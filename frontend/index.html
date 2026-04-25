@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RO 附魔分析系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap');
+        body { font-family: 'Noto Sans SC', sans-serif; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #1a1a2e; }
+        ::-webkit-scrollbar-thumb { background: #f59e0b; border-radius: 3px; }
+        input[type="range"] {
+            -webkit-appearance: none; appearance: none;
+            height: 8px; background: #374151; border-radius: 4px; outline: none; width: 100%;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none; appearance: none;
+            width: 20px; height: 20px; background: #f59e0b; border-radius: 50%; cursor: pointer;
+            box-shadow: 0 0 10px rgba(245,158,11,0.5);
+        }
+        input[type="range"]::-moz-range-thumb {
+            width: 20px; height: 20px; background: #f59e0b; border-radius: 50%; cursor: pointer;
+            box-shadow: 0 0 10px rgba(245,158,11,0.5); border: none;
+        }
+        .fade-enter-active, .fade-leave-active { transition: opacity 0.2s; }
+        .fade-enter-from, .fade-leave-to { opacity: 0; }
+    </style>
+</head>
+<body class="bg-[#1a1a2e] text-white min-h-screen">
+<div id="app" class="p-4 max-w-5xl mx-auto">
+
+    <!-- 导航栏 -->
+    <div class="flex items-center justify-between mb-6 border-b border-[#f59e0b]/30 pb-4">
+        <h1 class="text-xl font-bold text-[#f59e0b]">RO 附魔分析系统</h1>
+        <div class="flex gap-2">
+            <button v-for="tab in tabs" :key="tab.key"
+                @click="currentTab = tab.key"
+                :class="currentTab === tab.key
+                    ? 'bg-[#f59e0b] text-black font-bold'
+                    : 'bg-[#374151] hover:bg-[#4b5563]'"
+                class="px-4 py-2 rounded-lg transition-colors text-sm">
+                {{ tab.label }}
+            </button>
+        </div>
+    </div>
+
+    <!-- ==================== 配置页 ==================== -->
+    <div v-if="currentTab === 'config'">
+        <!-- 属性规则配置 -->
+        <div class="bg-[#16213e] border border-[#f59e0b]/30 rounded-lg p-5 mb-6">
+            <h2 class="text-lg font-bold text-[#f59e0b] mb-4">属性规则配置</h2>
+
+            <!-- 添加规则表单 -->
+            <div class="bg-[#1a1a2e] rounded-lg p-4 mb-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-2">属性名</label>
+                        <select v-model="form.selectedAttr"
+                            @change="onAttrChange"
+                            class="w-full bg-[#374151] border border-[#f59e0b]/30 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-[#f59e0b]">
+                            <option v-for="name in attributeNames" :key="name" :value="name">{{ name }}</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-2">最低阈值（大于等于此值才匹配）</label>
+                        <div class="flex items-center gap-3">
+                            <input type="number" :value="form.threshold"
+                                @input="form.threshold = parseFloat($event.target.value) || 0; updateSlider()"
+                                :step="attrConfig ? (attrConfig.type === 'percent' || attrConfig.type === 'resistance' ? 0.5 : 1) : 1"
+                                class="w-24 bg-[#374151] border border-[#f59e0b]/30 rounded-lg px-3 py-2 text-white text-center focus:outline-none focus:border-[#f59e0b]">
+                            <span class="text-gray-500 text-sm">{{ form.selectedAttr }}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 滑块 -->
+                <div class="mb-3" v-if="attrConfig">
+                    <input type="range" :min="attrConfig.min" :max="attrConfig.max"
+                        :step="attrConfig.type === 'percent' || attrConfig.type === 'resistance' ? 0.5 : 1"
+                        v-model.number="sliderValue"
+                        @input="form.threshold = sliderValue">
+                    <div class="flex justify-between text-xs text-gray-500 mt-1">
+                        <span>{{ attrConfig.min }}</span>
+                        <span>{{ attrConfig.max }}</span>
+                    </div>
+                </div>
+
+                <!-- 快速预设 -->
+                <div class="flex items-center gap-2 mb-4">
+                    <span class="text-sm text-gray-400">快速预设:</span>
+                    <button v-for="(preset, idx) in presetLabels" :key="idx"
+                        @click="applyPreset(idx)"
+                        :class="activePreset === idx ? 'bg-[#f59e0b] text-black font-bold' : 'bg-[#374151] hover:bg-[#4b5563]'"
+                        class="px-3 py-1 rounded text-sm transition-colors">
+                        {{ preset }}
+                    </button>
+                </div>
+
+                <button @click="addRule"
+                    class="w-full py-2 bg-[#8b5cf6] hover:bg-[#7c3aed] rounded-lg font-medium transition-colors">
+                    + 添加到规则
+                </button>
+            </div>
+
+            <!-- 当前规则列表 -->
+            <div class="bg-[#1a1a2e] rounded-lg p-4">
+                <div class="flex justify-between items-center mb-3">
+                    <span class="text-sm text-gray-400">当前规则 ({{ rules.length }}条)</span>
+                </div>
+                <div v-if="rules.length === 0" class="text-center py-6 text-gray-500">暂无规则，请添加</div>
+                <div v-else class="space-y-2">
+                    <div v-for="rule in rules" :key="rule.id"
+                        class="flex items-center justify-between bg-[#262f4d] p-3 rounded-lg">
+                        <div class="flex items-center gap-4">
+                            <span class="font-medium">{{ rule.attribute_name }}</span>
+                            <span class="text-[#f59e0b]">&ge; {{ rule.threshold }}</span>
+                        </div>
+                        <button @click="deleteRule(rule.id)"
+                            class="text-red-400 hover:text-red-300 px-3 py-1 rounded transition-colors">
+                            删除
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 组合特性配置 -->
+        <div class="bg-[#16213e] border border-[#f59e0b]/30 rounded-lg p-5 mb-6">
+            <h2 class="text-lg font-bold text-[#f59e0b] mb-4">组合特性配置</h2>
+            <div class="grid grid-cols-1 gap-3">
+                <label v-for="trait in traitDefs" :key="trait.name"
+                    class="flex items-center gap-4 bg-[#1a1a2e] p-3 rounded-lg cursor-pointer hover:bg-[#262f4d] transition-colors">
+                    <input type="checkbox" v-model="trait.enabled" class="w-5 h-5 accent-[#f59e0b]">
+                    <span class="font-medium w-12">{{ trait.name }}</span>
+                    <span class="text-gray-400 text-sm flex-1">{{ trait.desc }}</span>
+                    <div class="flex items-center gap-2">
+                        <span class="text-sm text-gray-400">最低等级:</span>
+                        <select v-model.number="trait.min_level"
+                            class="bg-[#374151] border border-[#f59e0b]/30 rounded px-2 py-1 text-sm w-16 focus:outline-none">
+                            <option v-for="lv in [1,2,3,4]" :key="lv" :value="lv">{{ lv }}</option>
+                        </select>
+                    </div>
+                </label>
+            </div>
+        </div>
+
+        <!-- 匹配配置 -->
+        <div class="bg-[#16213e] border border-[#f59e0b]/30 rounded-lg p-5 mb-6">
+            <h2 class="text-lg font-bold text-[#f59e0b] mb-4">匹配配置</h2>
+            <div class="flex items-center gap-4 bg-[#1a1a2e] p-4 rounded-lg">
+                <span class="text-gray-300">无组合特性时，至少匹配</span>
+                <select v-model.number="matchConfig.min_match_count"
+                    class="bg-[#374151] border border-[#f59e0b]/30 rounded px-3 py-2 w-20 text-center focus:outline-none">
+                    <option v-for="n in [1,2,3]" :key="n" :value="n">{{ n }}</option>
+                </select>
+                <span class="text-gray-300">条属性才保留</span>
+            </div>
+        </div>
+
+        <!-- 保存按钮 -->
+        <div class="flex justify-end gap-3">
+            <button @click="loadConfig" class="px-6 py-2 bg-[#374151] hover:bg-[#4b5563] rounded-lg transition-colors">重置</button>
+            <button @click="saveAllConfig" class="px-6 py-2 bg-[#f59e0b] hover:bg-[#d97706] text-black font-bold rounded-lg transition-colors">保存配置</button>
+        </div>
+    </div>
+
+    <!-- ==================== 分析页 ==================== -->
+    <div v-if="currentTab === 'analyze'">
+        <div class="bg-[#16213e] border border-[#f59e0b]/30 rounded-lg p-5">
+            <h2 class="text-lg font-bold text-[#f59e0b] mb-4">图片分析</h2>
+
+            <!-- 文件输入 -->
+            <div class="flex items-center gap-3 mb-4">
+                <select v-model="analyzeFilename"
+                    class="flex-1 bg-[#374151] border border-[#f59e0b]/30 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-[#f59e0b]">
+                    <option value="">-- 选择图片 --</option>
+                    <option v-for="f in imageFiles" :key="f" :value="f">{{ f }}</option>
+                </select>
+                <button @click="analyzeImage" :disabled="!analyzeFilename || analyzing"
+                    :class="!analyzeFilename || analyzing ? 'opacity-50 cursor-not-allowed' : ''"
+                    class="px-6 py-2 bg-[#8b5cf6] hover:bg-[#7c3aed] rounded-lg font-medium transition-colors">
+                    {{ analyzing ? '识别中...' : '分析' }}
+                </button>
+            </div>
+
+            <!-- 分析结果 -->
+            <div v-if="analyzeResult" class="bg-[#1a1a2e] rounded-lg p-4 mt-4">
+                <!-- 状态 -->
+                <div class="flex items-center gap-3 mb-4 pb-4 border-b border-[#374151]">
+                    <span class="text-2xl">{{ analyzeResult.status === 1 ? '✅' : '❌' }}</span>
+                    <div>
+                        <span :class="analyzeResult.status === 1 ? 'text-green-500' : 'text-red-500'" class="font-bold">
+                            {{ analyzeResult.status === 1 ? '保留' : '不保留' }}
+                        </span>
+                        <span class="text-gray-400 ml-2">| {{ analyzeResult.reason }}</span>
+                    </div>
+                </div>
+
+                <!-- 属性列表 -->
+                <div class="mb-4">
+                    <p class="text-sm text-gray-400 mb-2">识别到的属性:</p>
+                    <div class="space-y-2">
+                        <div v-for="detail in analyzeResult.matched_details" :key="detail.name"
+                            class="flex items-center justify-between bg-[#262f4d] p-2 rounded">
+                            <span>{{ detail.name }} +{{ detail.value }}</span>
+                            <span v-if="detail.threshold !== null"
+                                :class="detail.matched ? 'text-green-500' : 'text-red-500'" class="text-sm">
+                                {{ detail.matched ? '✓ 匹配 (≥' + detail.threshold + ')' : '✗ 不匹配 (需≥' + detail.threshold + ')' }}
+                            </span>
+                            <span v-else class="text-gray-500 text-sm">未设规则</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 组合特性 -->
+                <div v-if="analyzeResult.trait" class="mb-4">
+                    <p class="text-sm text-gray-400 mb-2">组合特性:</p>
+                    <div class="bg-[#262f4d] p-3 rounded border-l-4" :class="analyzeResult.trait_match?.matched ? 'border-green-500' : 'border-red-500'">
+                        <span class="text-[#f59e0b]">【组合特性】{{ analyzeResult.trait.name }}{{ analyzeResult.trait.level }}</span>
+                        <span v-if="analyzeResult.trait_match" :class="analyzeResult.trait_match.matched ? 'text-green-500' : 'text-red-500'" class="ml-2">
+                            {{ analyzeResult.trait_match.matched ? '等级≥' + analyzeResult.trait_match.min_level + ' ✓' : '等级<' + analyzeResult.trait_match.min_level + ' ✗' }}
+                        </span>
+                    </div>
+                </div>
+
+                <!-- 匹配总结 -->
+                <div class="bg-[#16213e] p-3 rounded border border-[#8b5cf6]/30">
+                    <p class="text-[#8b5cf6]">
+                        <span class="font-bold">匹配结果:</span>
+                        属性匹配 {{ analyzeResult.matched_count }}/{{ analyzeResult.min_match_count }} 条
+                        <span v-if="analyzeResult.trait"> | 组合特性 {{ analyzeResult.trait_match?.matched ? '✓' : '✗' }}</span>
+                        → {{ analyzeResult.status === 1 ? '保留' : '不保留' }}
+                    </p>
+                </div>
+
+                <!-- OCR原文 -->
+                <details class="mt-4">
+                    <summary class="text-gray-500 text-sm cursor-pointer hover:text-gray-300">OCR原始文本</summary>
+                    <pre class="bg-[#262f4d] p-3 rounded mt-2 text-xs text-gray-400 whitespace-pre-wrap">{{ analyzeResult.raw_text }}</pre>
+                </details>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== 历史记录页 ==================== -->
+    <div v-if="currentTab === 'history'">
+        <div class="bg-[#16213e] border border-[#f59e0b]/30 rounded-lg p-5">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-bold text-[#f59e0b]">识别历史</h2>
+                <div class="flex gap-2">
+                    <button @click="historyFilter = null" :class="historyFilter === null ? 'bg-[#f59e0b] text-black' : 'bg-[#374151]'"
+                        class="px-3 py-1 rounded text-sm transition-colors">全部</button>
+                    <button @click="historyFilter = 1" :class="historyFilter === 1 ? 'bg-green-600 text-white' : 'bg-[#374151]'"
+                        class="px-3 py-1 rounded text-sm transition-colors">保留</button>
+                    <button @click="historyFilter = 0" :class="historyFilter === 0 ? 'bg-red-600 text-white' : 'bg-[#374151]'"
+                        class="px-3 py-1 rounded text-sm transition-colors">忽略</button>
+                </div>
+            </div>
+
+            <div v-if="historyRecords.length === 0" class="text-center py-12 text-gray-500">暂无识别记录</div>
+
+            <div v-else class="space-y-3">
+                <div v-for="record in historyRecords" :key="record.id"
+                    class="bg-[#1a1a2e] rounded-lg p-4 border-l-4"
+                    :class="record.status === 1 ? 'border-green-500' : 'border-red-500'">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center gap-3">
+                            <span :class="record.status === 1 ? 'text-green-500' : 'text-red-500'" class="font-bold">
+                                {{ record.status === 1 ? '✅ 保留' : '❌ 忽略' }}
+                            </span>
+                            <span class="text-gray-400 text-sm">{{ record.filename }}</span>
+                            <span class="text-gray-500 text-xs">{{ record.created_at }}</span>
+                        </div>
+                        <button @click="deleteHistory(record.id)" class="text-red-400 hover:text-red-300 text-sm">删除</button>
+                    </div>
+                    <div class="flex flex-wrap gap-2 mb-2">
+                        <span v-for="attr in record.attributes" :key="attr.name"
+                            class="bg-[#262f4d] px-2 py-1 rounded text-sm">
+                            {{ attr.name }} +{{ attr.value }}
+                        </span>
+                        <span v-if="record.trait" class="bg-[#f59e0b]/20 text-[#f59e0b] px-2 py-1 rounded text-sm">
+                            {{ record.trait.name }}{{ record.trait.level }}
+                        </span>
+                    </div>
+                    <p class="text-gray-400 text-sm">{{ record.reason }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast 通知 -->
+    <div v-if="toast.show" class="fixed bottom-6 right-6 px-4 py-2 rounded-lg shadow-lg text-sm z-50"
+        :class="toast.type === 'success' ? 'bg-green-600' : toast.type === 'error' ? 'bg-red-600' : 'bg-[#374151]'">
+        {{ toast.message }}
+    </div>
+</div>
+
+<script>
+const { createApp, ref, computed, watch, onMounted } = Vue;
+
+createApp({
+    setup() {
+        const API = '';
+        const tabs = [
+            { key: 'config', label: '配置' },
+            { key: 'analyze', label: '分析' },
+            { key: 'history', label: '历史' },
+        ];
+        const currentTab = ref('config');
+        const presetLabels = ['极差', '普通', '优秀', '极品'];
+
+        // === 配置相关 ===
+        const attrDefs = ref({});
+        const traitDefs = ref([]);
+        const rules = ref([]);
+        const matchConfig = ref({ min_match_count: 1 });
+        const form = ref({ selectedAttr: '力量', threshold: 6 });
+        const sliderValue = ref(6);
+        const activePreset = ref(-1);
+
+        const attributeNames = computed(() => Object.keys(attrDefs.value));
+        const attrConfig = computed(() => attrDefs.value[form.value.selectedAttr] || null);
+
+        function onAttrChange() {
+            const cfg = attrConfig.value;
+            if (cfg) {
+                form.value.threshold = cfg.presets[1]; // 默认"普通"
+                sliderValue.value = form.value.threshold;
+                activePreset.value = 1;
+            }
+        }
+
+        function updateSlider() {
+            sliderValue.value = form.value.threshold;
+            activePreset.value = -1;
+        }
+
+        function applyPreset(idx) {
+            const cfg = attrConfig.value;
+            if (cfg) {
+                form.value.threshold = cfg.presets[idx];
+                sliderValue.value = form.value.threshold;
+                activePreset.value = idx;
+            }
+        }
+
+        // 监听滑块变化更新阈值
+        watch(sliderValue, (val) => {
+            form.value.threshold = val;
+            activePreset.value = -1;
+        });
+
+        // 监听属性选择变化
+        watch(() => form.value.selectedAttr, () => {
+            onAttrChange();
+        });
+
+        async function addRule() {
+            const res = await fetch(`${API}/api/rules/attributes`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ attribute_name: form.value.selectedAttr, threshold: form.value.threshold }),
+            });
+            if (res.ok) {
+                showToast('规则已添加', 'success');
+                await loadRules();
+            } else {
+                const err = await res.json();
+                showToast(err.detail || '添加失败', 'error');
+            }
+        }
+
+        async function deleteRule(id) {
+            const res = await fetch(`${API}/api/rules/attributes/${id}`, { method: 'DELETE' });
+            if (res.ok) {
+                showToast('已删除', 'success');
+                await loadRules();
+            }
+        }
+
+        async function saveAllConfig() {
+            // 保存组合特性
+            const traitsPayload = traitDefs.value.map(t => ({
+                trait_name: t.name,
+                enabled: t.enabled,
+                min_level: t.min_level,
+            }));
+            await fetch(`${API}/api/rules/traits`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ traits: traitsPayload }),
+            });
+            // 保存匹配配置
+            await fetch(`${API}/api/config/match`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ min_match_count: matchConfig.value.min_match_count }),
+            });
+            showToast('配置已保存', 'success');
+        }
+
+        async function loadConfig() {
+            const [defsRes, traitsDefRes, rulesRes, traitRulesRes, matchRes] = await Promise.all([
+                fetch(`${API}/api/attributes/definitions`),
+                fetch(`${API}/api/traits/definitions`),
+                fetch(`${API}/api/rules/attributes`),
+                fetch(`${API}/api/rules/traits`),
+                fetch(`${API}/api/config/match`),
+            ]);
+            attrDefs.value = await defsRes.json();
+            const traitDefsData = await traitsDefRes.json();
+            const rulesData = await rulesRes.json();
+            const traitRulesData = await traitRulesRes.json();
+            const matchData = await matchRes.json();
+
+            rules.value = rulesData.rules;
+            matchConfig.value = matchData;
+
+            // 组合特性：合并定义和已保存规则
+            const savedTraits = {};
+            (traitRulesData.traits || []).forEach(t => { savedTraits[t.trait_name] = t; });
+            traitDefs.value = Object.entries(traitDefsData).map(([name, def]) => {
+                const saved = savedTraits[name];
+                return {
+                    name,
+                    desc: def.desc,
+                    enabled: saved ? !!saved.enabled : false,
+                    min_level: saved ? saved.min_level : 1,
+                };
+            });
+
+            onAttrChange();
+        }
+
+        async function loadRules() {
+            const res = await fetch(`${API}/api/rules/attributes`);
+            const data = await res.json();
+            rules.value = data.rules;
+        }
+
+        // === 分析相关 ===
+        const imageFiles = ref([]);
+        const analyzeFilename = ref('');
+        const analyzing = ref(false);
+        const analyzeResult = ref(null);
+
+        async function loadFiles() {
+            const res = await fetch(`${API}/api/files`);
+            const data = await res.json();
+            imageFiles.value = data.files;
+        }
+
+        async function analyzeImage() {
+            if (!analyzeFilename.value) return;
+            analyzing.value = true;
+            analyzeResult.value = null;
+            try {
+                const res = await fetch(`${API}/api/enchantment/analyze`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filename: analyzeFilename.value }),
+                });
+                if (res.ok) {
+                    analyzeResult.value = await res.json();
+                } else {
+                    const err = await res.json();
+                    showToast(err.detail || '分析失败', 'error');
+                }
+            } catch (e) {
+                showToast('请求失败: ' + e.message, 'error');
+            } finally {
+                analyzing.value = false;
+            }
+        }
+
+        // === 历史记录相关 ===
+        const historyRecords = ref([]);
+        const historyFilter = ref(null);
+
+        async function loadHistory() {
+            const params = new URLSearchParams({ limit: '100' });
+            if (historyFilter.value !== null) params.set('status', historyFilter.value);
+            const res = await fetch(`${API}/api/history?${params}`);
+            const data = await res.json();
+            historyRecords.value = data.records.map(r => ({
+                ...r,
+                attributes: typeof r.attributes === 'string' ? JSON.parse(r.attributes) : r.attributes,
+                trait: typeof r.trait === 'string' ? JSON.parse(r.trait) : r.trait,
+            }));
+        }
+
+        async function deleteHistory(id) {
+            const res = await fetch(`${API}/api/history/${id}`, { method: 'DELETE' });
+            if (res.ok) await loadHistory();
+        }
+
+        watch(historyFilter, () => loadHistory());
+
+        // === Toast ===
+        const toast = ref({ show: false, message: '', type: 'info' });
+        function showToast(msg, type = 'info') {
+            toast.value = { show: true, message: msg, type };
+            setTimeout(() => { toast.value.show = false; }, 2500);
+        }
+
+        // === 初始化 ===
+        onMounted(async () => {
+            await loadConfig();
+            await loadFiles();
+            await loadHistory();
+        });
+
+        // 切换到分析页时刷新文件列表
+        watch(currentTab, (tab) => {
+            if (tab === 'analyze') loadFiles();
+            if (tab === 'history') loadHistory();
+        });
+
+        return {
+            tabs, currentTab, presetLabels,
+            attrDefs, traitDefs, rules, matchConfig, form, sliderValue, activePreset,
+            attributeNames, attrConfig,
+            onAttrChange, updateSlider, applyPreset,
+            addRule, deleteRule, saveAllConfig, loadConfig,
+            imageFiles, analyzeFilename, analyzing, analyzeResult, analyzeImage,
+            historyRecords, historyFilter, loadHistory, deleteHistory,
+            toast,
+        };
+    }
+}).mount('#app');
+</script>
+</body>
+</html>
