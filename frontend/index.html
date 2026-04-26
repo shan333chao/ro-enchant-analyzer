@@ -561,6 +561,8 @@ createApp({
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ name: name.trim() }),
                 });
+                const group = ruleGroups.value.find(g => g.id === groupId);
+                if (group) group.name = name.trim();
             } catch (e) {
                 console.error('重命名失败:', e);
             }
