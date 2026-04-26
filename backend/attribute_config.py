@@ -43,16 +43,23 @@ ATTRIBUTE_DEFINITIONS = {
 }
 
 # 组合特性定义
+# effect_base: 等级1时的效果值，总效果 = effect_base * level
+# attrs: 触发组合特性需要的两个属性
 TRAIT_DEFINITIONS = {
-    "破甲": {"desc": "物理穿刺+6%", "max_level": 4},
-    "破魔": {"desc": "魔法穿刺+6%", "max_level": 4},
-    "尖锐": {"desc": "暴击伤害增加20%", "max_level": 4},
-    "利刃": {"desc": "近战物理攻击增加10%", "max_level": 4},
-    "斗志": {"desc": "忽视物理防御20%", "max_level": 4},
-    "名弓": {"desc": "远程物理攻击增加10%", "max_level": 4},
-    "狂热": {"desc": "普攻伤害+10%", "max_level": 4},
-    "洞察": {"desc": "忽视魔法防御+20%", "max_level": 4},
-    "奥法": {"desc": "魔法伤害增加8%", "max_level": 4},
+    "神佑": {"desc": "魔法伤害减免", "attrs": ["体质", "魔法防御"], "effect_base": 2.5, "effect_unit": "%", "max_level": 4},
+    "破甲": {"desc": "物理穿刺", "attrs": ["力量", "灵巧"], "effect_base": 1.5, "effect_unit": "%", "max_level": 4},
+    "洞察": {"desc": "忽视魔法防御", "attrs": ["MaxSp%", "智力"], "effect_base": 5, "effect_unit": "%", "max_level": 4},
+    "破魔": {"desc": "魔法穿刺", "attrs": ["智力", "灵巧"], "effect_base": 1.5, "effect_unit": "%", "max_level": 4},
+    "尖锐": {"desc": "暴击伤害提升", "attrs": ["敏捷", "幸运"], "effect_base": 5, "effect_unit": "%", "max_level": 4},
+    "奥法": {"desc": "魔伤加成", "attrs": ["MaxSp%", "魔法攻击"], "effect_base": 2, "effect_unit": "%", "max_level": 4},
+    "斗志": {"desc": "忽视物理防御", "attrs": ["力量", "物理攻击"], "effect_base": 5, "effect_unit": "%", "max_level": 4},
+    "魔力": {"desc": "吟唱速度缩短", "attrs": ["智力", "魔法攻击"], "effect_base": 2.5, "effect_unit": "%", "max_level": 4},
+    "名弓": {"desc": "远程物攻增加", "attrs": ["灵巧", "命中"], "effect_base": 2.5, "effect_unit": "%", "max_level": 4},
+    "利刃": {"desc": "近战物攻增加", "attrs": ["装备攻速%", "物伤加成%"], "effect_base": 2.5, "effect_unit": "%", "max_level": 4},
+    "坚韧": {"desc": "物理伤害减免", "attrs": ["暴击", "物理防御"], "effect_base": 2.5, "effect_unit": "%", "max_level": 4},
+    "褻渎": {"desc": "技能伤害减免", "attrs": ["体质", "智力"], "effect_base": 2.5, "effect_unit": "%", "max_level": 4},
+    "狂热": {"desc": "普攻伤害增加", "attrs": ["装备攻速%", "爆伤%"], "effect_base": 2.5, "effect_unit": "%", "max_level": 4},
+    "铁甲": {"desc": "暴击防护增加", "attrs": ["体质", "爆伤减免%"], "effect_base": 5, "effect_unit": "", "max_level": 4},
 }
 
 # OCR识别名称映射（处理OCR常见错误）

@@ -149,7 +149,7 @@ def parse_attributes(texts: list[str]) -> tuple[list[dict], dict | None]:
 def _parse_trait(text: str) -> dict | None:
     """解析组合特性行"""
     # 匹配: 【组合特性】名弓1 或 组合特性名弓1 或 名弓1:远程物理攻击增加2.5%
-    trait_pattern = r"(?:【组合特性】)?(?:组合特性)?\s*(破甲|破魔|尖锐|利刃|斗志|名弓|狂热|洞察|奥法)\s*(\d)"
+    trait_pattern = r"(?:【组合特性】)?(?:组合特性)?\s*(神佑|破甲|洞察|破魔|尖锐|奥法|斗志|魔力|名弓|利刃|坚韧|褻渎|狂热|铁甲)\s*(\d)"
     match = re.search(trait_pattern, text)
     if match:
         return {
