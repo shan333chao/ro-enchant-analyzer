@@ -1,4 +1,4 @@
-"""SQLite 数据库操作"""
+"""SQLite 数据库操作 - 规则组模型"""
 
 import sqlite3
 import json
@@ -14,6 +14,7 @@ def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 
@@ -21,12 +22,19 @@ def init_db():
     """初始化数据库表"""
     conn = get_db()
     conn.executescript("""
-        CREATE TABLE IF NOT EXISTS attribute_rules (
+        CREATE TABLE IF NOT EXISTS rule_groups (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            attribute_name TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL DEFAULT '未命名组',
+            created_at TEXT DEFAULT (datetime('now', 'localtime'))
+        );
+
+        CREATE TABLE IF NOT EXISTS group_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id INTEGER NOT NULL,
+            attribute_name TEXT NOT NULL,
             threshold REAL NOT NULL,
             created_at TEXT DEFAULT (datetime('now', 'localtime')),
-            updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+            FOREIGN KEY (group_id) REFERENCES rule_groups(id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS trait_rules (
@@ -35,12 +43,6 @@ def init_db():
             enabled INTEGER DEFAULT 0,
             min_level INTEGER DEFAULT 1,
             created_at TEXT DEFAULT (datetime('now', 'localtime')),
-            updated_at TEXT DEFAULT (datetime('now', 'localtime'))
-        );
-
-        CREATE TABLE IF NOT EXISTS match_config (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
-            min_match_count INTEGER DEFAULT 1,
             updated_at TEXT DEFAULT (datetime('now', 'localtime'))
         );
 
@@ -55,55 +57,125 @@ def init_db():
             created_at TEXT DEFAULT (datetime('now', 'localtime'))
         );
     """)
-
-    # 初始化默认匹配配置
-    conn.execute(
-        "INSERT OR IGNORE INTO match_config (id, min_match_count) VALUES (1, 1)"
-    )
     conn.commit()
     conn.close()
 
 
-# === 属性规则 CRUD ===
+# === 规则组 CRUD ===
 
-def get_attribute_rules() -> list[dict]:
+def get_rule_groups() -> list[dict]:
+    """获取所有规则组（含组内规则）"""
     conn = get_db()
-    rows = conn.execute("SELECT * FROM attribute_rules ORDER BY id").fetchall()
+    groups = conn.execute("SELECT * FROM rule_groups ORDER BY id").fetchall()
+    result = []
+    for g in groups:
+        group = dict(g)
+        rules = conn.execute(
+            "SELECT * FROM group_rules WHERE group_id = ? ORDER BY id",
+            (g["id"],)
+        ).fetchall()
+        group["rules"] = [dict(r) for r in rules]
+        result.append(group)
     conn.close()
-    return [dict(r) for r in rows]
+    return result
 
 
-def add_attribute_rule(attribute_name: str, threshold: float) -> dict:
+def create_rule_group(name: str = "未命名组") -> dict:
+    """创建新规则组"""
     conn = get_db()
     conn.execute(
-        "INSERT OR REPLACE INTO attribute_rules (attribute_name, threshold, updated_at) VALUES (?, ?, datetime('now', 'localtime'))",
-        (attribute_name, threshold),
+        "INSERT INTO rule_groups (name) VALUES (?)",
+        (name,),
     )
     conn.commit()
-    row = conn.execute("SELECT * FROM attribute_rules WHERE attribute_name = ?", (attribute_name,)).fetchone()
+    row = conn.execute("SELECT * FROM rule_groups ORDER BY id DESC LIMIT 1").fetchone()
+    group = dict(row)
+    group["rules"] = []
     conn.close()
-    return dict(row)
+    return group
 
 
-def delete_attribute_rule(rule_id: int) -> bool:
+def update_rule_group(group_id: int, name: str) -> dict | None:
+    """更新规则组名称"""
     conn = get_db()
-    conn.execute("DELETE FROM attribute_rules WHERE id = ?", (rule_id,))
+    conn.execute(
+        "UPDATE rule_groups SET name = ? WHERE id = ?",
+        (name, group_id),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM rule_groups WHERE id = ?", (group_id,)).fetchone()
+    conn.close()
+    if not row:
+        return None
+    group = dict(row)
+    group["rules"] = get_group_rules(group_id)
+    return group
+
+
+def delete_rule_group(group_id: int) -> bool:
+    """删除规则组（级联删除组内规则）"""
+    conn = get_db()
+    conn.execute("DELETE FROM rule_groups WHERE id = ?", (group_id,))
     conn.commit()
     affected = conn.total_changes
     conn.close()
     return affected > 0
 
 
-def update_attribute_rule(rule_id: int, threshold: float) -> dict:
+# === 组内规则 CRUD ===
+
+def get_group_rules(group_id: int) -> list[dict]:
+    """获取组内所有规则"""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM group_rules WHERE group_id = ? ORDER BY id",
+        (group_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def add_group_rule(group_id: int, attribute_name: str, threshold: float) -> dict | None:
+    """向组内添加规则"""
+    conn = get_db()
+    # 检查组是否存在
+    group = conn.execute("SELECT id FROM rule_groups WHERE id = ?", (group_id,)).fetchone()
+    if not group:
+        conn.close()
+        return None
+    conn.execute(
+        "INSERT INTO group_rules (group_id, attribute_name, threshold) VALUES (?, ?, ?)",
+        (group_id, attribute_name, threshold),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM group_rules ORDER BY id DESC LIMIT 1").fetchone()
+    conn.close()
+    return dict(row)
+
+
+def update_group_rule(rule_id: int, threshold: float) -> dict | None:
+    """更新组内规则阈值"""
     conn = get_db()
     conn.execute(
-        "UPDATE attribute_rules SET threshold = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
+        "UPDATE group_rules SET threshold = ? WHERE id = ?",
         (threshold, rule_id),
     )
     conn.commit()
-    row = conn.execute("SELECT * FROM attribute_rules WHERE id = ?", (rule_id,)).fetchone()
+    row = conn.execute("SELECT * FROM group_rules WHERE id = ?", (rule_id,)).fetchone()
     conn.close()
+    if not row:
+        return None
     return dict(row)
+
+
+def delete_group_rule(rule_id: int) -> bool:
+    """删除组内规则"""
+    conn = get_db()
+    conn.execute("DELETE FROM group_rules WHERE id = ?", (rule_id,))
+    conn.commit()
+    affected = conn.total_changes
+    conn.close()
+    return affected > 0
 
 
 # === 组合特性规则 ===
@@ -129,27 +201,6 @@ def save_trait_rules(traits: list[dict]) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-# === 匹配配置 ===
-
-def get_match_config() -> dict:
-    conn = get_db()
-    row = conn.execute("SELECT * FROM match_config WHERE id = 1").fetchone()
-    conn.close()
-    return dict(row) if row else {"min_match_count": 1}
-
-
-def save_match_config(min_match_count: int) -> dict:
-    conn = get_db()
-    conn.execute(
-        "UPDATE match_config SET min_match_count = ?, updated_at = datetime('now', 'localtime') WHERE id = 1",
-        (min_match_count,),
-    )
-    conn.commit()
-    row = conn.execute("SELECT * FROM match_config WHERE id = 1").fetchone()
-    conn.close()
-    return dict(row)
-
-
 # === 分析历史 ===
 
 def add_analysis_history(
@@ -166,7 +217,7 @@ def add_analysis_history(
         (
             filename,
             json.dumps(attributes, ensure_ascii=False),
-            trait,
+            json.dumps(trait, ensure_ascii=False) if trait else None,
             status,
             reason,
             json.dumps(matched_rules, ensure_ascii=False) if matched_rules else None,
@@ -195,6 +246,7 @@ def get_analysis_history(limit: int = 50, offset: int = 0, status: int | None = 
     for r in rows:
         item = dict(r)
         item["attributes"] = json.loads(item["attributes"])
+        item["trait"] = json.loads(item["trait"]) if item["trait"] else None
         item["matched_rules"] = json.loads(item["matched_rules"]) if item["matched_rules"] else []
         result.append(item)
     return result

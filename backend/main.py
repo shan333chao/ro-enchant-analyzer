@@ -12,9 +12,10 @@ from pydantic import BaseModel
 sys.path.insert(0, os.path.dirname(__file__))
 
 from database import (
-    init_db, get_attribute_rules, add_attribute_rule, delete_attribute_rule,
-    update_attribute_rule, get_trait_rules, save_trait_rules,
-    get_match_config, save_match_config,
+    init_db,
+    get_rule_groups, create_rule_group, update_rule_group, delete_rule_group,
+    add_group_rule, update_group_rule, delete_group_rule,
+    get_trait_rules, save_trait_rules,
     add_analysis_history, get_analysis_history, get_history_count,
     delete_analysis_history,
 )
@@ -50,16 +51,7 @@ def index():
     return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
 
 
-# ===== 属性配置 API =====
-
-class AttributeRuleRequest(BaseModel):
-    attribute_name: str
-    threshold: float
-
-
-class AttributeRuleUpdate(BaseModel):
-    threshold: float
-
+# ===== 属性定义 API =====
 
 @app.get("/api/attributes/definitions")
 def api_attribute_definitions():
@@ -73,33 +65,81 @@ def api_trait_definitions():
     return TRAIT_DEFINITIONS
 
 
-@app.get("/api/rules/attributes")
-def api_get_attribute_rules():
-    """获取当前属性规则列表"""
-    return {"rules": get_attribute_rules()}
+# ===== 规则组 API =====
+
+class CreateGroupRequest(BaseModel):
+    name: str = "未命名组"
 
 
-@app.post("/api/rules/attributes")
-def api_add_attribute_rule(req: AttributeRuleRequest):
-    """添加/更新属性规则"""
+class UpdateGroupRequest(BaseModel):
+    name: str
+
+
+class AddRuleRequest(BaseModel):
+    attribute_name: str
+    threshold: float
+
+
+class UpdateRuleRequest(BaseModel):
+    threshold: float
+
+
+@app.get("/api/rules/groups")
+def api_get_rule_groups():
+    """获取所有规则组（含组内规则）"""
+    return {"groups": get_rule_groups()}
+
+
+@app.post("/api/rules/groups")
+def api_create_rule_group(req: CreateGroupRequest):
+    """创建新规则组"""
+    group = create_rule_group(req.name)
+    return {"group": group}
+
+
+@app.put("/api/rules/groups/{group_id}")
+def api_update_rule_group(group_id: int, req: UpdateGroupRequest):
+    """更新规则组名称"""
+    group = update_rule_group(group_id, req.name)
+    if not group:
+        raise HTTPException(404, "规则组不存在")
+    return {"group": group}
+
+
+@app.delete("/api/rules/groups/{group_id}")
+def api_delete_rule_group(group_id: int):
+    """删除规则组"""
+    ok = delete_rule_group(group_id)
+    if not ok:
+        raise HTTPException(404, "规则组不存在")
+    return {"ok": True}
+
+
+@app.post("/api/rules/groups/{group_id}/rules")
+def api_add_group_rule(group_id: int, req: AddRuleRequest):
+    """向组内添加规则"""
     config = get_attribute_config(req.attribute_name)
     if not config:
         raise HTTPException(400, f"未知属性: {req.attribute_name}")
-    rule = add_attribute_rule(req.attribute_name, req.threshold)
+    rule = add_group_rule(group_id, req.attribute_name, req.threshold)
+    if not rule:
+        raise HTTPException(404, "规则组不存在")
     return {"rule": rule}
 
 
-@app.put("/api/rules/attributes/{rule_id}")
-def api_update_attribute_rule(rule_id: int, req: AttributeRuleUpdate):
-    """更新属性规则阈值"""
-    rule = update_attribute_rule(rule_id, req.threshold)
+@app.put("/api/rules/groups/{group_id}/rules/{rule_id}")
+def api_update_group_rule(group_id: int, rule_id: int, req: UpdateRuleRequest):
+    """更新组内规则阈值"""
+    rule = update_group_rule(rule_id, req.threshold)
+    if not rule:
+        raise HTTPException(404, "规则不存在")
     return {"rule": rule}
 
 
-@app.delete("/api/rules/attributes/{rule_id}")
-def api_delete_attribute_rule(rule_id: int):
-    """删除属性规则"""
-    ok = delete_attribute_rule(rule_id)
+@app.delete("/api/rules/groups/{group_id}/rules/{rule_id}")
+def api_delete_group_rule(group_id: int, rule_id: int):
+    """删除组内规则"""
+    ok = delete_group_rule(rule_id)
     if not ok:
         raise HTTPException(404, "规则不存在")
     return {"ok": True}
@@ -128,24 +168,6 @@ def api_save_trait_rules(req: TraitRulesRequest):
     """批量保存组合特性规则"""
     traits = save_trait_rules([t.model_dump() for t in req.traits])
     return {"traits": traits}
-
-
-# ===== 匹配配置 API =====
-
-class MatchConfigRequest(BaseModel):
-    min_match_count: int
-
-
-@app.get("/api/config/match")
-def api_get_match_config():
-    """获取匹配配置"""
-    return get_match_config()
-
-
-@app.post("/api/config/match")
-def api_save_match_config(req: MatchConfigRequest):
-    """保存匹配配置"""
-    return save_match_config(req.min_match_count)
 
 
 # ===== 分析 API =====
@@ -198,19 +220,12 @@ def _do_analyze(filename: str):
         "reason": match_result["reason"],
         "matched_details": match_result["matched_details"],
         "trait_match": match_result["trait_match"],
-        "matched_count": match_result["matched_count"],
-        "min_match_count": match_result["min_match_count"],
+        "matched_group": match_result["matched_group"],
         "raw_text": ocr_result["raw_text"],
     }
 
 
 # ===== 历史记录 API =====
-
-class HistoryQuery(BaseModel):
-    limit: int = 50
-    offset: int = 0
-    status: int | None = None
-
 
 @app.get("/api/history")
 def api_get_history(limit: int = 50, offset: int = 0, status: int | None = None):
