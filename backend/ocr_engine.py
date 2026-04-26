@@ -2,6 +2,10 @@
 
 import re
 import os
+import tempfile
+
+import cv2
+import numpy as np
 
 # 禁用 oneDNN 避免 paddlepaddle 3.x 在 Windows 上的兼容性问题
 os.environ["FLAGS_use_mkldnn"] = "0"
@@ -12,6 +16,17 @@ except ImportError:
     from attribute_config import resolve_attribute_name, ATTRIBUTE_DEFINITIONS
 
 IMAGE_DIR = os.path.join(os.path.dirname(__file__), "..")
+
+# OCR常见识别错误映射（属性名）
+TRAIT_OCR_ALIASES = {
+    "名引": "名弓",
+    "名利": "名弓",
+    "名刃": "名弓",
+    "破甲": "破甲",
+    "褻读": "褻渎",
+    "亵读": "褻渎",
+    "亵渎": "褻渎",
+}
 
 
 def recognize_image(filename: str) -> dict:
@@ -32,21 +47,52 @@ def recognize_image(filename: str) -> dict:
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"图片文件不存在: {filepath}")
 
+    # 预处理图片
+    preprocessed_path = _preprocess_image(filepath)
+
     # 懒加载 PaddleOCR
     ocr = _get_ocr()
-    result = ocr.ocr(filepath)
+    result = ocr.ocr(preprocessed_path)
+
+    # 清理临时文件
+    if preprocessed_path != filepath:
+        try:
+            os.unlink(preprocessed_path)
+        except OSError:
+            pass
 
     if not result or not result[0]:
         raise ValueError("OCR识别失败，未检测到文字")
 
-    # 提取所有文本
-    raw_texts = []
+    # 提取所有文本，按位置排序
+    items = []
     for line in result[0]:
         text = line[1][0]
         confidence = line[1][1]
-        if confidence > 0.5:  # 置信度过滤
-            raw_texts.append(text)
+        if confidence > 0.5:
+            box = line[0]
+            cy = sum(p[1] for p in box) / 4
+            cx = sum(p[0] for p in box) / 4
+            items.append((cy, cx, text))
 
+    # 按行分组：cy相近的归为同一行，行内按cx排序（左到右）
+    if items:
+        items.sort(key=lambda x: x[0])  # 先按cy排序
+        rows = []
+        current_row = [items[0]]
+        for item in items[1:]:
+            # 如果cy差距小于行高的一半，归为同一行
+            if abs(item[0] - current_row[0][0]) < 30:
+                current_row.append(item)
+            else:
+                current_row.sort(key=lambda x: x[1])  # 行内按cx排序
+                rows.extend(current_row)
+                current_row = [item]
+        current_row.sort(key=lambda x: x[1])
+        rows.extend(current_row)
+        raw_texts = [text for _, _, text in rows]
+    else:
+        raw_texts = []
     raw_text = "\n".join(raw_texts)
 
     # 解析属性
@@ -59,6 +105,40 @@ def recognize_image(filename: str) -> dict:
     }
 
 
+def _preprocess_image(filepath: str) -> str:
+    """
+    预处理图片以提高OCR精度。
+    1. 4x放大 - 小图(501x185)文字太小
+    2. 灰度 + CLAHE对比度增强 - 处理游戏UI渐变背景
+    """
+    img = cv2.imread(filepath)
+    if img is None:
+        return filepath
+
+    h, w = img.shape[:2]
+
+    # 只对小图做预处理（宽<800 或 高<400）
+    if w >= 800 and h >= 400:
+        return filepath
+
+    # 4x 放大
+    scale = 4
+    scaled = cv2.resize(img, (w * scale, h * scale), interpolation=cv2.INTER_CUBIC)
+
+    # 灰度
+    gray = cv2.cvtColor(scaled, cv2.COLOR_BGR2GRAY)
+
+    # CLAHE 对比度增强
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    enhanced = clahe.apply(gray)
+
+    # 保存到临时文件
+    tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+    cv2.imwrite(tmp.name, enhanced)
+    tmp.close()
+    return tmp.name
+
+
 _ocr_instance = None
 
 
@@ -69,6 +149,10 @@ def _get_ocr():
         _ocr_instance = PaddleOCR(
             use_angle_cls=True,
             lang="ch",
+            det_db_thresh=0.2,
+            det_db_box_thresh=0.3,
+            det_db_unclip_ratio=2.0,
+            use_dilation=True,
         )
     return _ocr_instance
 
@@ -154,11 +238,14 @@ def parse_attributes(texts: list[str]) -> tuple[list[dict], dict | None]:
 def _parse_trait(text: str) -> dict | None:
     """解析组合特性行"""
     # 匹配: 【组合特性】名弓1 或 组合特性名弓1 或 名弓1:远程物理攻击增加2.5%
-    trait_pattern = r"(?:【组合特性】)?(?:组合特性)?\s*(神佑|破甲|洞察|破魔|尖锐|奥法|斗志|魔力|名弓|利刃|坚韧|褻渎|狂热|铁甲)\s*(\d)"
+    # 包含OCR常见错误别名
+    trait_names = "神佑|破甲|洞察|破魔|尖锐|奥法|斗志|魔力|名弓|名引|名利|利刃|坚韧|褻渎|亵渎|亵读|褻读|狂热|铁甲"
+    trait_pattern = rf"(?:【组合特性】)?(?:组合特性)?\s*({trait_names})\s*(\d)"
     match = re.search(trait_pattern, text)
     if match:
+        name = TRAIT_OCR_ALIASES.get(match.group(1), match.group(1))
         return {
-            "name": match.group(1),
+            "name": name,
             "level": int(match.group(2)),
         }
     return None
