@@ -25,6 +25,8 @@ def init_db():
         CREATE TABLE IF NOT EXISTS rule_groups (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL DEFAULT '未命名组',
+            trait_name TEXT DEFAULT NULL,
+            trait_level INTEGER DEFAULT 4,
             created_at TEXT DEFAULT (datetime('now', 'localtime'))
         );
 
@@ -87,12 +89,12 @@ def get_rule_groups() -> list[dict]:
     return result
 
 
-def create_rule_group(name: str = "未命名组") -> dict:
+def create_rule_group(name: str = "未命名组", trait_name: str | None = None, trait_level: int = 4) -> dict:
     """创建新规则组"""
     conn = get_db()
     conn.execute(
-        "INSERT INTO rule_groups (name) VALUES (?)",
-        (name,),
+        "INSERT INTO rule_groups (name, trait_name, trait_level) VALUES (?, ?, ?)",
+        (name, trait_name, trait_level),
     )
     conn.commit()
     row = conn.execute("SELECT * FROM rule_groups ORDER BY id DESC LIMIT 1").fetchone()
@@ -108,6 +110,23 @@ def update_rule_group(group_id: int, name: str) -> dict | None:
     conn.execute(
         "UPDATE rule_groups SET name = ? WHERE id = ?",
         (name, group_id),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM rule_groups WHERE id = ?", (group_id,)).fetchone()
+    conn.close()
+    if not row:
+        return None
+    group = dict(row)
+    group["rules"] = get_group_rules(group_id)
+    return group
+
+
+def update_rule_group_trait(group_id: int, trait_name: str | None, trait_level: int = 4) -> dict | None:
+    """更新规则组的组合特性"""
+    conn = get_db()
+    conn.execute(
+        "UPDATE rule_groups SET trait_name = ?, trait_level = ? WHERE id = ?",
+        (trait_name, trait_level, group_id),
     )
     conn.commit()
     row = conn.execute("SELECT * FROM rule_groups WHERE id = ?", (group_id,)).fetchone()
@@ -249,7 +268,10 @@ def load_scheme_to_config(scheme_id: int) -> dict | None:
 
     # 写入方案中的规则组
     for group_data in scheme_data.get("groups", []):
-        conn.execute("INSERT INTO rule_groups (name) VALUES (?)", (group_data["name"],))
+        conn.execute(
+            "INSERT INTO rule_groups (name, trait_name, trait_level) VALUES (?, ?, ?)",
+            (group_data["name"], group_data.get("trait_name"), group_data.get("trait_level", 4)),
+        )
         group_row = conn.execute("SELECT id FROM rule_groups ORDER BY id DESC LIMIT 1").fetchone()
         group_id = group_row["id"]
         for rule_data in group_data.get("rules", []):
@@ -257,13 +279,6 @@ def load_scheme_to_config(scheme_id: int) -> dict | None:
                 "INSERT INTO group_rules (group_id, attribute_name, threshold) VALUES (?, ?, ?)",
                 (group_id, rule_data["attribute_name"], rule_data["threshold"]),
             )
-
-    # 写入方案中的特性配置
-    for trait_data in scheme_data.get("traits", []):
-        conn.execute(
-            "INSERT INTO trait_rules (trait_name, enabled, min_level) VALUES (?, ?, ?)",
-            (trait_data["trait_name"], 1 if trait_data.get("enabled") else 0, trait_data.get("min_level", 1)),
-        )
 
     conn.commit()
     conn.close()

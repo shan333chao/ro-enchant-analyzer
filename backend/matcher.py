@@ -1,9 +1,9 @@
 """匹配逻辑 - 规则组匹配（组内AND，组间OR）"""
 
 try:
-    from .database import get_rule_groups, get_trait_rules
+    from .database import get_rule_groups
 except ImportError:
-    from database import get_rule_groups, get_trait_rules
+    from database import get_rule_groups
 
 
 def match_enchantment(attributes: list[dict], trait: dict | None) -> dict:
@@ -11,78 +11,50 @@ def match_enchantment(attributes: list[dict], trait: dict | None) -> dict:
     匹配附魔属性，返回判定结果。
 
     规则：
-    1. 组合特性优先 - 勾选的特性等级满足即保留
-    2. 规则组匹配 - 组内AND（全满足），组间OR（任一组满足即保留）
-
-    参数:
-        attributes: [{"name": "命中", "value": 12.0}, ...]
-        trait: {"name": "名弓", "level": 1} 或 None
-
-    返回:
-        {
-            "status": 1 或 0,
-            "reason": "原因说明",
-            "matched_group": 匹配的组名 或 None,
-            "matched_details": [{"name": "命中", "value": 12.0, "threshold": 10.0, "matched": true}, ...],
-            "trait_match": {"name": "名弓", "level": 1, "min_level": 1, "matched": true} 或 None
-        }
+    每个规则组独立判定：
+    - 有组合特性的组：特性等级>=要求 AND 所有属性规则满足
+    - 无组合特性的组：所有属性规则满足
+    组间OR：任一组满足即保留
     """
     # 构建属性映射 {属性名: 数值}
     attr_map = {a["name"]: a["value"] for a in attributes}
-
-    # === 组合特性匹配 ===
-    trait_rules = get_trait_rules()
-    trait_map = {t["trait_name"]: t["min_level"] for t in trait_rules if t["enabled"]}
-
-    trait_match = None
-    if trait:
-        trait_name = trait["name"]
-        trait_level = trait["level"]
-        min_level = trait_map.get(trait_name)
-        if min_level is not None and trait_level >= min_level:
-            trait_match = {
-                "name": trait_name,
-                "level": trait_level,
-                "min_level": min_level,
-                "matched": True,
-            }
-        elif min_level is not None:
-            trait_match = {
-                "name": trait_name,
-                "level": trait_level,
-                "min_level": min_level,
-                "matched": False,
-            }
-        else:
-            trait_match = {
-                "name": trait_name,
-                "level": trait_level,
-                "min_level": None,
-                "matched": False,
-            }
-
-    # 组合特性优先判定
-    if trait and trait["name"] in trait_map:
-        if trait_match and trait_match["matched"]:
-            return _result(1, f"组合特性 {trait['name']}{trait['level']} 符合",
-                         trait_match=trait_match)
-        return _result(0, f"组合特性 {trait['name']}{trait['level']} 等级低于最低要求 {trait_map[trait['name']]}",
-                     trait_match=trait_match)
 
     # === 规则组匹配（组内AND，组间OR）===
     rule_groups = get_rule_groups()
 
     if not rule_groups:
-        return _result(0, "无规则组，默认不保留", trait_match=trait_match)
+        return _result(0, "无规则组，默认不保留")
 
     for group in rule_groups:
         group_rules = group.get("rules", [])
+
+        # === 检查组合特性 ===
+        group_trait_name = group.get("trait_name")
+        group_trait_level = group.get("trait_level", 4)
+
+        if group_trait_name:
+            # 组有关联特性：必须有该特性且等级达标
+            if not trait or trait["name"] != group_trait_name:
+                continue  # 特性不匹配，跳过此组
+            if trait["level"] < group_trait_level:
+                continue  # 特性等级不足，跳过此组
+
+        # === 检查属性规则（组内AND）===
         if not group_rules:
-            continue
+            # 无属性规则的组，有特性匹配就够了
+            if group_trait_name:
+                matched_details = _build_details([], attr_map)
+                return _result(
+                    1,
+                    f"满足规则组「{group['name']}」: {group_trait_name}{group_trait_level}",
+                    matched_details=matched_details,
+                    matched_group=group["name"],
+                    trait_match=_build_trait_match(trait, group_trait_name, group_trait_level),
+                )
+            continue  # 无特性也无规则，跳过
 
         all_matched = True
         matched_details = []
-
         for rule in group_rules:
             attr_value = attr_map.get(rule["attribute_name"])
             if attr_value is not None and attr_value >= rule["threshold"]:
@@ -102,20 +74,44 @@ def match_enchantment(attributes: list[dict], trait: dict | None) -> dict:
                 all_matched = False
 
         if all_matched:
-            matched_names = ", ".join(
-                f"{r['attribute_name']}>={r['threshold']}" for r in group_rules
-            )
+            # 构建匹配原因
+            parts = []
+            if group_trait_name:
+                parts.append(f"{group_trait_name}{group_trait_level}")
+            rule_str = ", ".join(f"{r['attribute_name']}>={r['threshold']}" for r in group_rules)
+            if rule_str:
+                parts.append(rule_str)
+            reason = f"满足规则组「{group['name']}」: {' + '.join(parts)}"
+
             return _result(
                 1,
-                f"满足规则组「{group['name']}」: {matched_names}",
+                reason,
                 matched_details=matched_details,
                 matched_group=group["name"],
-                trait_match=trait_match,
+                trait_match=_build_trait_match(trait, group_trait_name, group_trait_level),
             )
 
     # 所有组都不满足
     group_names = ", ".join(g["name"] for g in rule_groups)
-    return _result(0, f"未满足任何规则组 ({group_names})", trait_match=trait_match)
+    return _result(0, f"未满足任何规则组 ({group_names})")
+
+
+def _build_trait_match(trait, group_trait_name, group_trait_level):
+    """构建特性匹配详情"""
+    if not trait or not group_trait_name:
+        return None
+    matched = trait["name"] == group_trait_name and trait["level"] >= group_trait_level
+    return {
+        "name": trait["name"],
+        "level": trait["level"],
+        "min_level": group_trait_level,
+        "matched": matched,
+    }
+
+
+def _build_details(rules, attr_map):
+    """构建空规则组的详情"""
+    return []
 
 
 def _result(status, reason, matched_details=None, matched_group=None, trait_match=None):

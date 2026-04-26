@@ -14,8 +14,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 from database import (
     init_db,
     get_rule_groups, create_rule_group, update_rule_group, delete_rule_group,
+    update_rule_group_trait,
     add_group_rule, update_group_rule, delete_group_rule,
-    get_trait_rules, save_trait_rules,
     get_schemes, get_scheme, save_scheme, delete_scheme, load_scheme_to_config,
     add_analysis_history, get_analysis_history, get_history_count,
     delete_analysis_history,
@@ -70,10 +70,17 @@ def api_trait_definitions():
 
 class CreateGroupRequest(BaseModel):
     name: str = "未命名组"
+    trait_name: str | None = None
+    trait_level: int = 4
 
 
 class UpdateGroupRequest(BaseModel):
     name: str
+
+
+class UpdateGroupTraitRequest(BaseModel):
+    trait_name: str | None = None
+    trait_level: int = 4
 
 
 class AddRuleRequest(BaseModel):
@@ -94,7 +101,7 @@ def api_get_rule_groups():
 @app.post("/api/rules/groups")
 def api_create_rule_group(req: CreateGroupRequest):
     """创建新规则组"""
-    group = create_rule_group(req.name)
+    group = create_rule_group(req.name, req.trait_name, req.trait_level)
     return {"group": group}
 
 
@@ -102,6 +109,15 @@ def api_create_rule_group(req: CreateGroupRequest):
 def api_update_rule_group(group_id: int, req: UpdateGroupRequest):
     """更新规则组名称"""
     group = update_rule_group(group_id, req.name)
+    if not group:
+        raise HTTPException(404, "规则组不存在")
+    return {"group": group}
+
+
+@app.put("/api/rules/groups/{group_id}/trait")
+def api_update_rule_group_trait(group_id: int, req: UpdateGroupTraitRequest):
+    """更新规则组的组合特性"""
+    group = update_rule_group_trait(group_id, req.trait_name, req.trait_level)
     if not group:
         raise HTTPException(404, "规则组不存在")
     return {"group": group}
@@ -146,31 +162,6 @@ def api_delete_group_rule(group_id: int, rule_id: int):
     return {"ok": True}
 
 
-# ===== 组合特性配置 API =====
-
-class TraitRuleItem(BaseModel):
-    trait_name: str
-    enabled: bool
-    min_level: int
-
-
-class TraitRulesRequest(BaseModel):
-    traits: list[TraitRuleItem]
-
-
-@app.get("/api/rules/traits")
-def api_get_trait_rules():
-    """获取组合特性规则"""
-    return {"traits": get_trait_rules()}
-
-
-@app.post("/api/rules/traits")
-def api_save_trait_rules(req: TraitRulesRequest):
-    """批量保存组合特性规则"""
-    traits = save_trait_rules([t.model_dump() for t in req.traits])
-    return {"traits": traits}
-
-
 # ===== 配置方案 API =====
 
 class SaveSchemeRequest(BaseModel):
@@ -196,22 +187,19 @@ def api_get_scheme(scheme_id: int):
 def api_save_scheme(req: SaveSchemeRequest):
     """将当前配置保存为新方案"""
     groups = get_rule_groups()
-    traits = get_trait_rules()
-    # 序列化：只保留规则组名+规则内容，去掉id
+    # 序列化：只保留规则组名+特性+规则内容，去掉id
     scheme_data = {
         "groups": [
             {
                 "name": g["name"],
+                "trait_name": g.get("trait_name"),
+                "trait_level": g.get("trait_level", 4),
                 "rules": [
                     {"attribute_name": r["attribute_name"], "threshold": r["threshold"]}
                     for r in g["rules"]
                 ],
             }
             for g in groups
-        ],
-        "traits": [
-            {"trait_name": t["trait_name"], "enabled": bool(t["enabled"]), "min_level": t["min_level"]}
-            for t in traits
         ],
     }
     scheme = save_scheme(req.name, scheme_data)
