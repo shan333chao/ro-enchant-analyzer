@@ -115,14 +115,19 @@ def parse_attributes(texts: list[str]) -> tuple[list[dict], dict | None]:
             value = None
             if i + 1 < len(texts):
                 next_text = texts[i + 1].strip()
-                value = _extract_value(next_text, attr_name)
-                if value is not None:
-                    # 找到配对的数值
-                    i += 2
-                else:
-                    # 下一行不是数值，尝试在同一行找
+                # 不消费组合特性行作为属性值
+                if _parse_trait(next_text):
                     value = _extract_value(text, attr_name)
                     i += 1
+                else:
+                    value = _extract_value(next_text, attr_name)
+                    if value is not None:
+                        # 找到配对的数值
+                        i += 2
+                    else:
+                        # 下一行不是数值，尝试在同一行找
+                        value = _extract_value(text, attr_name)
+                        i += 1
             else:
                 # 没有下一行，尝试在同一行找
                 value = _extract_value(text, attr_name)
