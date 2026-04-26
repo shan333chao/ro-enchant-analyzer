@@ -63,7 +63,7 @@ def api_attribute_definitions():
 @app.get("/api/traits/definitions")
 def api_trait_definitions():
     """获取所有组合特性定义"""
-    return TRAIT_DEFINITIONS
+    return [{"name": k, **v} for k, v in TRAIT_DEFINITIONS.items()]
 
 
 # ===== 规则组 API =====
