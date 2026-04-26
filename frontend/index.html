@@ -50,6 +50,86 @@
     <!-- ==================== 配置页 ==================== -->
     <div v-if="currentTab === 'config'">
 
+        <!-- 配置方案栏 -->
+        <div class="bg-[#16213e] border border-[#10b981]/30 rounded-lg p-4 mb-6">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <span class="text-sm text-gray-400">配置方案:</span>
+                    <select v-model="selectedSchemeId"
+                        class="bg-[#374151] border border-[#10b981]/30 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-[#10b981] min-w-[160px]">
+                        <option :value="null">-- 当前配置 --</option>
+                        <option v-for="s in schemes" :key="s.id" :value="s.id">{{ s.name }}</option>
+                    </select>
+                    <button v-if="selectedSchemeId"
+                        @click="loadScheme(selectedSchemeId)"
+                        class="px-3 py-1.5 bg-[#10b981] hover:bg-[#059669] text-black rounded-lg text-sm font-medium transition-colors">
+                        切换到此方案
+                    </button>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button @click="showSaveScheme = true"
+                        class="px-3 py-1.5 bg-[#374151] hover:bg-[#4b5563] rounded-lg text-sm transition-colors">
+                        保存为新方案
+                    </button>
+                    <button @click="showSchemeMgr = true; loadSchemes()"
+                        class="px-3 py-1.5 bg-[#374151] hover:bg-[#4b5563] rounded-lg text-sm transition-colors">
+                        方案管理
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 保存方案弹窗 -->
+        <div v-if="showSaveScheme" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" @click.self="showSaveScheme = false">
+            <div class="bg-[#16213e] border border-[#10b981]/30 rounded-lg p-6 w-96">
+                <h3 class="text-lg font-bold text-[#10b981] mb-4">保存为新方案</h3>
+                <input type="text" v-model="newSchemeName" placeholder="方案名称（如：武器流）"
+                    class="w-full bg-[#374151] border border-[#f59e0b]/30 rounded-lg px-3 py-2 text-white text-sm mb-4 focus:outline-none focus:border-[#f59e0b]">
+                <div class="flex gap-2">
+                    <button @click="doSaveScheme" :disabled="!newSchemeName.trim()"
+                        :class="!newSchemeName.trim() ? 'opacity-50 cursor-not-allowed' : ''"
+                        class="flex-1 py-2 bg-[#10b981] hover:bg-[#059669] text-black rounded-lg font-medium transition-colors">
+                        保存
+                    </button>
+                    <button @click="showSaveScheme = false"
+                        class="px-4 py-2 bg-[#374151] hover:bg-[#4b5563] rounded-lg transition-colors">
+                        取消
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 方案管理弹窗 -->
+        <div v-if="showSchemeMgr" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" @click.self="showSchemeMgr = false">
+            <div class="bg-[#16213e] border border-[#10b981]/30 rounded-lg p-6 w-[420px]">
+                <h3 class="text-lg font-bold text-[#10b981] mb-4">配置方案管理</h3>
+                <div v-if="schemes.length === 0" class="text-center py-6 text-gray-500">暂无保存的方案</div>
+                <div v-else class="space-y-2 max-h-[400px] overflow-y-auto mb-4">
+                    <div v-for="s in schemes" :key="s.id"
+                        class="flex items-center justify-between bg-[#1a1a2e] p-3 rounded-lg">
+                        <div>
+                            <span class="font-medium text-sm">{{ s.name }}</span>
+                            <span class="text-xs text-gray-500 ml-2">{{ s.created_at }}</span>
+                        </div>
+                        <div class="flex gap-2">
+                            <button @click="loadScheme(s.id); showSchemeMgr = false"
+                                class="px-3 py-1 bg-[#10b981] hover:bg-[#059669] text-black rounded text-xs font-medium transition-colors">
+                                切换
+                            </button>
+                            <button @click="deleteSchemeItem(s.id)"
+                                class="px-3 py-1 bg-red-500/20 hover:bg-red-500/40 text-red-400 rounded text-xs transition-colors">
+                                删除
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <button @click="showSchemeMgr = false"
+                    class="w-full py-2 bg-[#374151] hover:bg-[#4b5563] rounded-lg transition-colors">
+                    关闭
+                </button>
+            </div>
+        </div>
+
         <!-- 规则组配置 -->
         <div class="bg-[#16213e] border border-[#f59e0b]/30 rounded-lg p-5 mb-6">
             <div class="flex items-center justify-between mb-4">
@@ -385,6 +465,75 @@ createApp({
         const historyTotal = ref(0);
         const historyFilter = ref(null);
 
+        // === 配置方案 ===
+        const schemes = ref([]);
+        const selectedSchemeId = ref(null);
+        const showSaveScheme = ref(false);
+        const showSchemeMgr = ref(false);
+        const newSchemeName = ref('');
+
+        // === 配置方案操作 ===
+        async function loadSchemes() {
+            try {
+                const res = await fetch('/api/schemes');
+                const data = await res.json();
+                schemes.value = data.schemes || [];
+            } catch (e) {
+                console.error('加载方案失败:', e);
+            }
+        }
+
+        async function doSaveScheme() {
+            if (!newSchemeName.value.trim()) return;
+            // 先保存当前特性配置
+            await saveAllConfig(true);
+            try {
+                const res = await fetch('/api/schemes', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: newSchemeName.value.trim() }),
+                });
+                if (res.ok) {
+                    alert('方案已保存');
+                    showSaveScheme.value = false;
+                    newSchemeName.value = '';
+                    loadSchemes();
+                } else {
+                    const err = await res.json();
+                    alert('保存失败: ' + (err.detail || '未知错误'));
+                }
+            } catch (e) {
+                alert('保存失败: ' + e.message);
+            }
+        }
+
+        async function loadScheme(schemeId) {
+            if (!confirm('切换方案将替换当前所有配置，确定？')) return;
+            try {
+                const res = await fetch(`/api/schemes/${schemeId}/load`, { method: 'POST' });
+                if (res.ok) {
+                    alert('方案已加载');
+                    await loadConfig();
+                    selectedSchemeId.value = schemeId;
+                } else {
+                    alert('加载失败');
+                }
+            } catch (e) {
+                alert('加载失败: ' + e.message);
+            }
+        }
+
+        async function deleteSchemeItem(schemeId) {
+            if (!confirm('确定删除此方案？')) return;
+            try {
+                await fetch(`/api/schemes/${schemeId}`, { method: 'DELETE' });
+                schemes.value = schemes.value.filter(s => s.id !== schemeId);
+                if (selectedSchemeId.value === schemeId) selectedSchemeId.value = null;
+            } catch (e) {
+                console.error('删除方案失败:', e);
+            }
+        }
+
         // === 加载配置 ===
         async function loadConfig() {
             try {
@@ -515,7 +664,7 @@ createApp({
         }
 
         // === 保存配置 ===
-        async function saveAllConfig() {
+        async function saveAllConfig(silent = false) {
             try {
                 // 保存组合特性
                 await fetch('/api/rules/traits', {
@@ -529,10 +678,10 @@ createApp({
                         })),
                     }),
                 });
-                alert('配置已保存');
+                if (!silent) alert('配置已保存');
             } catch (e) {
                 console.error('保存配置失败:', e);
-                alert('保存失败');
+                if (!silent) alert('保存失败');
             }
         }
 
@@ -586,7 +735,7 @@ createApp({
             }
         });
 
-        onMounted(loadConfig);
+        onMounted(() => { loadConfig(); loadSchemes(); });
 
         return {
             currentTab, tabs,
@@ -601,6 +750,8 @@ createApp({
             analyzeImage,
             historyRecords, historyTotal, historyFilter,
             loadHistory, deleteHistory,
+            schemes, selectedSchemeId, showSaveScheme, showSchemeMgr, newSchemeName,
+            loadSchemes, doSaveScheme, loadScheme, deleteSchemeItem,
         };
     }
 }).mount('#app');

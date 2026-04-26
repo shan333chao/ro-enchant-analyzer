@@ -16,6 +16,7 @@ from database import (
     get_rule_groups, create_rule_group, update_rule_group, delete_rule_group,
     add_group_rule, update_group_rule, delete_group_rule,
     get_trait_rules, save_trait_rules,
+    get_schemes, get_scheme, save_scheme, delete_scheme, load_scheme_to_config,
     add_analysis_history, get_analysis_history, get_history_count,
     delete_analysis_history,
 )
@@ -168,6 +169,71 @@ def api_save_trait_rules(req: TraitRulesRequest):
     """批量保存组合特性规则"""
     traits = save_trait_rules([t.model_dump() for t in req.traits])
     return {"traits": traits}
+
+
+# ===== 配置方案 API =====
+
+class SaveSchemeRequest(BaseModel):
+    name: str
+
+
+@app.get("/api/schemes")
+def api_get_schemes():
+    """获取所有配置方案"""
+    return {"schemes": get_schemes()}
+
+
+@app.get("/api/schemes/{scheme_id}")
+def api_get_scheme(scheme_id: int):
+    """获取方案详情"""
+    scheme = get_scheme(scheme_id)
+    if not scheme:
+        raise HTTPException(404, "方案不存在")
+    return scheme
+
+
+@app.post("/api/schemes")
+def api_save_scheme(req: SaveSchemeRequest):
+    """将当前配置保存为新方案"""
+    groups = get_rule_groups()
+    traits = get_trait_rules()
+    # 序列化：只保留规则组名+规则内容，去掉id
+    scheme_data = {
+        "groups": [
+            {
+                "name": g["name"],
+                "rules": [
+                    {"attribute_name": r["attribute_name"], "threshold": r["threshold"]}
+                    for r in g["rules"]
+                ],
+            }
+            for g in groups
+        ],
+        "traits": [
+            {"trait_name": t["trait_name"], "enabled": bool(t["enabled"]), "min_level": t["min_level"]}
+            for t in traits
+        ],
+    }
+    scheme = save_scheme(req.name, scheme_data)
+    return {"scheme": scheme}
+
+
+@app.post("/api/schemes/{scheme_id}/load")
+def api_load_scheme(scheme_id: int):
+    """加载方案到当前配置"""
+    result = load_scheme_to_config(scheme_id)
+    if not result:
+        raise HTTPException(404, "方案不存在")
+    return {"ok": True, "data": result}
+
+
+@app.delete("/api/schemes/{scheme_id}")
+def api_delete_scheme(scheme_id: int):
+    """删除配置方案"""
+    ok = delete_scheme(scheme_id)
+    if not ok:
+        raise HTTPException(404, "方案不存在")
+    return {"ok": True}
 
 
 # ===== 分析 API =====

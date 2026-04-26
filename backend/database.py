@@ -46,6 +46,13 @@ def init_db():
             updated_at TEXT DEFAULT (datetime('now', 'localtime'))
         );
 
+        CREATE TABLE IF NOT EXISTS config_schemes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            data TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now', 'localtime'))
+        );
+
         CREATE TABLE IF NOT EXISTS analysis_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             filename TEXT NOT NULL,
@@ -176,6 +183,91 @@ def delete_group_rule(rule_id: int) -> bool:
     affected = conn.total_changes
     conn.close()
     return affected > 0
+
+
+# === 配置方案 ===
+
+def get_schemes() -> list[dict]:
+    """获取所有配置方案"""
+    conn = get_db()
+    rows = conn.execute("SELECT id, name, created_at FROM config_schemes ORDER BY id").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_scheme(scheme_id: int) -> dict | None:
+    """获取单个方案详情"""
+    conn = get_db()
+    row = conn.execute("SELECT * FROM config_schemes WHERE id = ?", (scheme_id,)).fetchone()
+    conn.close()
+    if not row:
+        return None
+    result = dict(row)
+    result["data"] = json.loads(result["data"])
+    return result
+
+
+def save_scheme(name: str, data: dict) -> dict:
+    """保存配置方案"""
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO config_schemes (name, data) VALUES (?, ?)",
+        (name, json.dumps(data, ensure_ascii=False)),
+    )
+    conn.commit()
+    row = conn.execute("SELECT id, name, created_at FROM config_schemes ORDER BY id DESC LIMIT 1").fetchone()
+    conn.close()
+    return dict(row)
+
+
+def delete_scheme(scheme_id: int) -> bool:
+    """删除配置方案"""
+    conn = get_db()
+    conn.execute("DELETE FROM config_schemes WHERE id = ?", (scheme_id,))
+    conn.commit()
+    affected = conn.total_changes
+    conn.close()
+    return affected > 0
+
+
+def load_scheme_to_config(scheme_id: int) -> dict | None:
+    """加载方案并应用到当前配置（清空现有规则组+特性，写入方案内容）"""
+    conn = get_db()
+    row = conn.execute("SELECT * FROM config_schemes WHERE id = ?", (scheme_id,)).fetchone()
+    if not row:
+        conn.close()
+        return None
+
+    scheme_data = json.loads(row["data"])
+
+    # 清空现有规则组和组内规则
+    conn.execute("DELETE FROM group_rules")
+    conn.execute("DELETE FROM rule_groups")
+
+    # 清空现有特性规则
+    conn.execute("DELETE FROM trait_rules")
+
+    # 写入方案中的规则组
+    for group_data in scheme_data.get("groups", []):
+        conn.execute("INSERT INTO rule_groups (name) VALUES (?)", (group_data["name"],))
+        group_row = conn.execute("SELECT id FROM rule_groups ORDER BY id DESC LIMIT 1").fetchone()
+        group_id = group_row["id"]
+        for rule_data in group_data.get("rules", []):
+            conn.execute(
+                "INSERT INTO group_rules (group_id, attribute_name, threshold) VALUES (?, ?, ?)",
+                (group_id, rule_data["attribute_name"], rule_data["threshold"]),
+            )
+
+    # 写入方案中的特性配置
+    for trait_data in scheme_data.get("traits", []):
+        conn.execute(
+            "INSERT INTO trait_rules (trait_name, enabled, min_level) VALUES (?, ?, ?)",
+            (trait_data["trait_name"], 1 if trait_data.get("enabled") else 0, trait_data.get("min_level", 1)),
+        )
+
+    conn.commit()
+    conn.close()
+    return scheme_data
 
 
 # === 组合特性规则 ===
