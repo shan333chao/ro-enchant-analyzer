@@ -2,6 +2,27 @@
 
 仙境传说RO（Ragnarok Online）附魔截图 OCR 识别与筛选工具。自动识别附魔属性，根据预设规则判断是否保留。
 
+## 截图预览
+
+<table>
+  <tr>
+    <td align="center"><b>规则配置</b></td>
+    <td align="center"><b>OCR 分析</b></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshot-rules.png" width="400"/></td>
+    <td><img src="docs/screenshot-analyze-result.png" width="400"/></td>
+  </tr>
+  <tr>
+    <td align="center"><b>分析历史</b></td>
+    <td align="center"><b>系统设置</b></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshot-history.png" width="400"/></td>
+    <td><img src="docs/screenshot-settings.png" width="400"/></td>
+  </tr>
+</table>
+
 ## 功能
 
 - **OCR 识别** — 基于 OnnxOCR (PP-OCRv5) 的附魔属性文字识别，支持双通检测（彩色+CLAHE灰度）
