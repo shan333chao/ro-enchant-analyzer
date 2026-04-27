@@ -56,20 +56,25 @@
                 <div class="flex items-center gap-3">
                     <span class="text-sm text-gray-400">配置方案:</span>
                     <select v-model="selectedSchemeId"
+                        @change="onSchemeSelect"
                         class="bg-[#374151] border border-[#10b981]/30 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-[#10b981] min-w-[160px]">
                         <option :value="null">-- 当前配置 --</option>
                         <option v-for="s in schemes" :key="s.id" :value="s.id">{{ s.name }}</option>
                     </select>
                     <button v-if="selectedSchemeId"
-                        @click="loadScheme(selectedSchemeId)"
-                        class="px-3 py-1.5 bg-[#10b981] hover:bg-[#059669] text-black rounded-lg text-sm font-medium transition-colors">
-                        切换到此方案
+                        @click="updateScheme"
+                        class="px-3 py-1.5 bg-[#f59e0b] hover:bg-[#d97706] text-black rounded-lg text-sm font-medium transition-colors">
+                        更新方案
                     </button>
                 </div>
                 <div class="flex items-center gap-2">
                     <button @click="showSaveScheme = true"
                         class="px-3 py-1.5 bg-[#374151] hover:bg-[#4b5563] rounded-lg text-sm transition-colors">
                         保存为新方案
+                    </button>
+                    <button @click="showNewScheme = true"
+                        class="px-3 py-1.5 bg-[#ef4444] hover:bg-[#dc2626] text-black rounded-lg text-sm transition-colors">
+                        新建空白方案
                     </button>
                     <button @click="showSchemeMgr = true; loadSchemes()"
                         class="px-3 py-1.5 bg-[#374151] hover:bg-[#4b5563] rounded-lg text-sm transition-colors">
@@ -92,6 +97,26 @@
                         保存
                     </button>
                     <button @click="showSaveScheme = false"
+                        class="px-4 py-2 bg-[#374151] hover:bg-[#4b5563] rounded-lg transition-colors">
+                        取消
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 新建空白方案弹窗 -->
+        <div v-if="showNewScheme" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" @click.self="showNewScheme = false">
+            <div class="bg-[#16213e] border border-[#ef4444]/30 rounded-lg p-6 w-96">
+                <h3 class="text-lg font-bold text-[#ef4444] mb-4">新建空白方案</h3>
+                <input type="text" v-model="blankSchemeName" placeholder="方案名称（如：武器流）"
+                    class="w-full bg-[#374151] border border-[#f59e0b]/30 rounded-lg px-3 py-2 text-white text-sm mb-4 focus:outline-none focus:border-[#f59e0b]">
+                <div class="flex gap-2">
+                    <button @click="doCreateBlankScheme" :disabled="!blankSchemeName.trim()"
+                        :class="!blankSchemeName.trim() ? 'opacity-50 cursor-not-allowed' : ''"
+                        class="flex-1 py-2 bg-[#ef4444] hover:bg-[#dc2626] text-black rounded-lg font-medium transition-colors">
+                        创建
+                    </button>
+                    <button @click="showNewScheme = false"
                         class="px-4 py-2 bg-[#374151] hover:bg-[#4b5563] rounded-lg transition-colors">
                         取消
                     </button>
@@ -260,6 +285,7 @@
                     <option value="">-- 选择图片 --</option>
                     <option v-for="f in imageFiles" :key="f" :value="f">{{ f }}</option>
                 </select>
+                <button @click="loadFiles" class="px-3 py-2 bg-[#374151] hover:bg-[#4b5563] rounded-lg text-sm transition-colors" title="刷新图片列表">刷新</button>
                 <button @click="analyzeImage" :disabled="!analyzeFilename || analyzing"
                     :class="!analyzeFilename || analyzing ? 'opacity-50 cursor-not-allowed' : ''"
                     class="px-6 py-2 bg-[#8b5cf6] hover:bg-[#7c3aed] rounded-lg font-medium transition-colors">
@@ -269,6 +295,12 @@
 
             <!-- 分析结果 -->
             <div v-if="analyzeResult" class="bg-[#1a1a2e] rounded-lg p-4 mt-4">
+                <!-- 原图 -->
+                <div class="mb-4">
+                    <img :src="'/api/images/' + analyzeFilename" alt="原图"
+                        class="rounded-lg border border-[#374151] max-h-64 mx-auto">
+                </div>
+
                 <!-- 状态 -->
                 <div class="flex items-center gap-3 mb-4 pb-4 border-b border-[#374151]">
                     <span class="text-2xl">{{ analyzeResult.status === 1 ? '✅' : '❌' }}</span>
@@ -328,54 +360,149 @@
     <!-- ==================== 历史页 ==================== -->
     <div v-if="currentTab === 'history'">
         <div class="bg-[#16213e] border border-[#f59e0b]/30 rounded-lg p-5">
+            <!-- 标题 + 分页 -->
             <div class="flex items-center justify-between mb-4">
-                <h2 class="text-lg font-bold text-[#f59e0b]">分析历史</h2>
-                <div class="flex gap-2">
-                    <button @click="historyFilter = null; loadHistory()"
-                        :class="historyFilter === null ? 'bg-[#f59e0b] text-black font-bold' : 'bg-[#374151] hover:bg-[#4b5563]'"
-                        class="px-3 py-1 rounded text-xs transition-colors">全部</button>
-                    <button @click="historyFilter = 1; loadHistory()"
-                        :class="historyFilter === 1 ? 'bg-green-500 text-black font-bold' : 'bg-[#374151] hover:bg-[#4b5563]'"
-                        class="px-3 py-1 rounded text-xs transition-colors">保留</button>
-                    <button @click="historyFilter = 0; loadHistory()"
-                        :class="historyFilter === 0 ? 'bg-red-500 text-black font-bold' : 'bg-[#374151] hover:bg-[#4b5563]'"
-                        class="px-3 py-1 rounded text-xs transition-colors">不保留</button>
+                <div class="flex items-center gap-3">
+                    <h2 class="text-lg font-bold text-[#f59e0b]">分析历史</h2>
+                    <button v-if="historyTotal > 0" @click="confirmClearHistory"
+                        class="px-2.5 py-1 bg-red-500/20 hover:bg-red-500/40 text-red-400 text-xs rounded transition-colors">清空全部</button>
                 </div>
+                <div v-if="historyTotal > 0" class="flex items-center gap-3 text-xs text-gray-500">
+                    <span>共 {{ historyTotal }} 条</span>
+                    <button @click="historyPage > 1 && (historyPage--, loadHistory())"
+                        :class="historyPage > 1 ? 'hover:text-gray-300 cursor-pointer' : 'opacity-50 cursor-not-allowed'"
+                        class="px-3 py-1.5 bg-[#374151] rounded transition-colors">上一页</button>
+                    <span class="text-gray-400 font-medium">{{ historyPage }} / {{ Math.max(1, Math.ceil(historyTotal / historyPageSize)) }}</span>
+                    <button @click="(historyPage * historyPageSize) < historyTotal && (historyPage++, loadHistory())"
+                        :class="(historyPage * historyPageSize) < historyTotal ? 'hover:text-gray-300 cursor-pointer' : 'opacity-50 cursor-not-allowed'"
+                        class="px-3 py-1.5 bg-[#374151] rounded transition-colors">下一页</button>
+                </div>
+            </div>
+
+            <!-- 筛选工具栏 -->
+            <div class="flex items-center gap-3 mb-4 bg-[#1a1a2e] rounded-lg p-3">
+                <!-- 状态筛选 -->
+                <div class="flex items-center gap-1.5">
+                    <span class="text-xs text-gray-500">状态</span>
+                    <button @click="historyFilter = null; historyPage = 1; loadHistory()"
+                        :class="historyFilter === null ? 'bg-[#f59e0b] text-black font-bold' : 'bg-[#374151] hover:bg-[#4b5563]'"
+                        class="px-3 py-1.5 rounded text-xs transition-colors min-w-[48px]">全部</button>
+                    <button @click="historyFilter = 1; historyPage = 1; loadHistory()"
+                        :class="historyFilter === 1 ? 'bg-green-500 text-black font-bold' : 'bg-[#374151] hover:bg-[#4b5563]'"
+                        class="px-3 py-1.5 rounded text-xs transition-colors min-w-[48px]">保留</button>
+                    <button @click="historyFilter = 0; historyPage = 1; loadHistory()"
+                        :class="historyFilter === 0 ? 'bg-red-500 text-black font-bold' : 'bg-[#374151] hover:bg-[#4b5563]'"
+                        class="px-3 py-1.5 rounded text-xs transition-colors min-w-[48px]">不保留</button>
+                </div>
+
+                <div class="w-px h-6 bg-[#374151]"></div>
+
+                <!-- 特性筛选 -->
+                <div class="flex items-center gap-1.5">
+                    <span class="text-xs text-gray-500">特性</span>
+                    <select v-model="historyTraitFilter"
+                        @change="historyPage = 1; loadHistory()"
+                        class="bg-[#374151] border border-[#10b981]/30 rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-[#10b981] min-w-[100px]">
+                        <option value="">全部</option>
+                        <option v-for="t in traitDefs" :key="t.name" :value="t.name">{{ t.name }}</option>
+                    </select>
+                </div>
+
+                <div class="w-px h-6 bg-[#374151]"></div>
+
+                <!-- 方案筛选 -->
+                <div class="flex items-center gap-1.5">
+                    <span class="text-xs text-gray-500">方案</span>
+                    <select v-model="historySchemeFilter"
+                        @change="historyPage = 1; loadHistory()"
+                        class="bg-[#374151] border border-[#f59e0b]/30 rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-[#f59e0b] min-w-[100px]">
+                        <option value="">全部</option>
+                        <option v-for="s in historySchemeNames" :key="s" :value="s">{{ s }}</option>
+                    </select>
+                </div>
+
+                <div class="w-px h-6 bg-[#374151]"></div>
+
+                <!-- 属性筛选 -->
+                <div class="flex items-center gap-1.5 relative">
+                    <span class="text-xs text-gray-500">属性</span>
+                    <button @click="showAttributeFilter = !showAttributeFilter"
+                        class="px-2.5 py-1.5 bg-[#374151] hover:bg-[#4b5563] border border-[#8b5cf6]/30 rounded-lg text-xs transition-colors min-w-[100px] text-center">
+                        {{ historyAttributeFilter || '全部' }}
+                    </button>
+                    <!-- 属性选择弹窗 -->
+                    <div v-if="showAttributeFilter"
+                        class="absolute top-full left-0 mt-2 bg-[#262f4d] border border-[#374151] rounded-lg p-3 w-[360px] z-10">
+                        <div class="flex flex-wrap gap-x-3 gap-y-1.5">
+                            <label v-for="name in attributeNames" :key="name"
+                                class="flex items-center gap-1 text-xs text-gray-300 cursor-pointer whitespace-nowrap">
+                                <input type="radio" :value="name" v-model="historyAttributeFilter"
+                                    class="w-3.5 h-3.5 accent-[#f59e0b]">
+                                <span>{{ name }}</span>
+                            </label>
+                        </div>
+                        <div class="flex gap-2 mt-3 pt-2 border-t border-[#374151]">
+                            <button @click="historyPage = 1; loadHistory(); showAttributeFilter = false"
+                                class="flex-1 py-1.5 bg-[#8b5cf6] hover:bg-[#7c3aed] rounded-lg text-xs text-white font-medium">确定</button>
+                            <button @click="historyAttributeFilter = ''; historyTraitFilter = ''; historySchemeFilter = ''; historyPage = 1; loadHistory(); showAttributeFilter = false"
+                                class="px-4 py-1.5 bg-gray-500 hover:bg-gray-600 rounded-lg text-xs">重置</button>
+                            <button @click="showAttributeFilter = false"
+                                class="px-4 py-1.5 bg-[#374151] hover:bg-[#4b5563] rounded-lg text-xs">取消</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 刷新按钮 -->
+                <button @click="loadHistory()"
+                    class="px-3 py-1.5 bg-[#374151] hover:bg-[#4b5563] rounded-lg text-xs transition-colors">
+                    刷新
+                </button>
             </div>
 
             <div v-if="historyRecords.length === 0" class="text-center py-8 text-gray-500">暂无历史记录</div>
 
-            <div class="space-y-3">
-                <div v-for="record in historyRecords" :key="record.id"
-                    class="bg-[#1a1a2e] p-4 rounded-lg">
-                    <div class="flex items-center justify-between mb-2">
-                        <div class="flex items-center gap-2">
-                            <span>{{ record.status === 1 ? '✅' : '❌' }}</span>
-                            <span class="font-medium text-sm">{{ record.filename }}</span>
+            <!-- 历史记录列表容器（内部滚动） -->
+            <div class="max-h-[calc(100vh-200px)] overflow-y-auto">
+                <div class="space-y-3">
+                    <div v-for="record in historyRecords" :key="record.id"
+                        class="bg-[#1a1a2e] p-4 rounded-lg flex gap-3">
+                        <!-- 原图缩略图 -->
+                        <div class="w-44 h-[72px] flex-shrink-0 rounded-lg overflow-hidden bg-[#262f4d]">
+                            <img :src="'/api/images/' + record.filename" alt="原图"
+                                class="w-full h-full object-contain" loading="lazy">
                         </div>
-                        <div class="flex items-center gap-2">
-                            <span class="text-xs text-gray-500">{{ record.created_at }}</span>
-                            <button @click="deleteHistory(record.id)"
-                                class="text-red-400/60 hover:text-red-400 text-xs px-2 py-1 transition-colors">删除</button>
+                        <!-- 内容区 -->
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center justify-between mb-1">
+                                <div class="flex items-center gap-2">
+                                    <span>{{ record.status === 1 ? '✅' : '❌' }}</span>
+                                    <span class="font-medium text-sm truncate">{{ record.filename }}</span>
+                                    <span v-if="record.trait" class="text-[10px] bg-[#8b5cf6]/20 text-[#8b5cf6] px-1.5 py-0.5 rounded">
+                                        {{ record.trait.name }}{{ record.trait.level }}
+                                    </span>
+                                    <span v-if="record.scheme_name" class="text-[10px] bg-[#f59e0b]/20 text-[#f59e0b] px-1.5 py-0.5 rounded">
+                                        {{ record.scheme_name }}
+                                    </span>
+                                </div>
+                                <div class="flex items-center gap-2 flex-shrink-0">
+                                    <span class="text-xs text-gray-500">{{ record.created_at }}</span>
+                                    <button @click="deleteHistory(record.id)"
+                                        class="text-red-400/60 hover:text-red-400 text-xs transition-colors">删除</button>
+                                </div>
+                            </div>
+                            <p class="text-xs text-gray-500 mb-1 truncate">{{ record.reason }}</p>
+                            <div class="flex flex-wrap gap-1">
+                                <span v-for="attr in record.attributes" :key="attr.name"
+                                    class="bg-[#262f4d] px-2 py-0.5 rounded text-xs">
+                                    {{ attr.name }} <span class="text-[#f59e0b]">{{ attr.value }}</span>
+                                </span>
+                            </div>
                         </div>
-                    </div>
-                    <p class="text-xs text-gray-400 mb-2">{{ record.reason }}</p>
-                    <div class="flex flex-wrap gap-1">
-                        <span v-for="attr in record.attributes" :key="attr.name"
-                            class="bg-[#262f4d] px-2 py-0.5 rounded text-xs">
-                            {{ attr.name }} <span class="text-[#f59e0b]">{{ attr.value }}</span>
-                        </span>
                     </div>
                 </div>
             </div>
-
-            <div v-if="historyTotal > historyRecords.length" class="text-center mt-4">
-                <span class="text-xs text-gray-500">共 {{ historyTotal }} 条记录</span>
-            </div>
         </div>
     </div>
-
-</div>
 
 <script>
 const { createApp, ref, reactive, computed, onMounted, watch } = Vue;
@@ -431,6 +558,13 @@ createApp({
         const historyRecords = ref([]);
         const historyTotal = ref(0);
         const historyFilter = ref(null);
+        const historyTraitFilter = ref('');
+        const historyAttributeFilter = ref('');
+        const historySchemeFilter = ref('');
+        const historySchemeNames = ref([]);
+        const showAttributeFilter = ref(false);
+        const historyPage = ref(1);
+        const historyPageSize = 20;
 
         // === 配置方案 ===
         const schemes = ref([]);
@@ -438,8 +572,9 @@ createApp({
         const showSaveScheme = ref(false);
         const showSchemeMgr = ref(false);
         const newSchemeName = ref('');
-
-        // === 特性相关工具 ===
+        const blankSchemeName = ref('');
+        const showNewScheme = ref(false);
+        const prevSchemeId = ref(null);
         function getTraitDef(name) {
             return traitDefs.value.find(t => t.name === name);
         }
@@ -485,12 +620,35 @@ createApp({
             }
         }
 
+        async function doCreateBlankScheme() {
+            if (!blankSchemeName.value.trim()) return;
+            if (!confirm('创建空白方案将清空当前所有规则组，确定？')) return;
+            try {
+                const res = await fetch('/api/schemes/blank', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: blankSchemeName.value.trim() }),
+                });
+                if (res.ok) {
+                    alert('空白方案已创建');
+                    showNewScheme.value = false;
+                    blankSchemeName.value = '';
+                    // 清空本地规则组显示
+                    ruleGroups.value = [];
+                    loadSchemes();
+                } else {
+                    const err = await res.json();
+                    alert('创建失败: ' + (err.detail || '未知错误'));
+                }
+            } catch (e) {
+                alert('创建失败: ' + e.message);
+            }
+        }
+
         async function loadScheme(schemeId) {
-            if (!confirm('切换方案将替换当前所有配置，确定？')) return;
             try {
                 const res = await fetch(`/api/schemes/${schemeId}/load`, { method: 'POST' });
                 if (res.ok) {
-                    alert('方案已加载');
                     await loadConfig();
                     selectedSchemeId.value = schemeId;
                 } else {
@@ -498,6 +656,34 @@ createApp({
                 }
             } catch (e) {
                 alert('加载失败: ' + e.message);
+            }
+        }
+
+        async function onSchemeSelect() {
+            const newId = selectedSchemeId.value;
+            if (newId) {
+                if (!confirm('切换方案将替换当前所有配置，确定？')) {
+                    selectedSchemeId.value = prevSchemeId.value;
+                    return;
+                }
+                await loadScheme(newId);
+            }
+            prevSchemeId.value = selectedSchemeId.value;
+        }
+
+        async function updateScheme() {
+            if (!selectedSchemeId.value) return;
+            const schemeName = schemes.value.find(s => s.id === selectedSchemeId.value)?.name;
+            if (!confirm(`确定将当前配置更新到方案「${schemeName}」？`)) return;
+            try {
+                const res = await fetch(`/api/schemes/${selectedSchemeId.value}`, { method: 'PUT' });
+                if (res.ok) {
+                    alert('方案已更新');
+                } else {
+                    alert('更新失败');
+                }
+            } catch (e) {
+                alert('更新失败: ' + e.message);
             }
         }
 
@@ -535,6 +721,16 @@ createApp({
                 imageFiles.value = filesData.files || [];
             } catch (e) {
                 console.error('加载配置失败:', e);
+            }
+        }
+
+        async function loadFiles() {
+            try {
+                const res = await fetch('/api/files');
+                const data = await res.json();
+                imageFiles.value = data.files || [];
+            } catch (e) {
+                console.error('加载文件列表失败:', e);
             }
         }
 
@@ -669,9 +865,14 @@ createApp({
             analyzing.value = true;
             analyzeResult.value = null;
             try {
-                const res = await fetch(
-                    `/api/enchantment/analyze?filename=${encodeURIComponent(analyzeFilename.value)}`
-                );
+                const schemeName = selectedSchemeId.value
+                    ? schemes.value.find(s => s.id === selectedSchemeId.value)?.name || null
+                    : null;
+                const res = await fetch('/api/enchantment/analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filename: analyzeFilename.value, scheme_name: schemeName }),
+                });
                 analyzeResult.value = await res.json();
             } catch (e) {
                 console.error('分析失败:', e);
@@ -684,12 +885,25 @@ createApp({
         // === 历史 ===
         async function loadHistory() {
             try {
-                const params = new URLSearchParams({ limit: '50', offset: '0' });
+                const params = new URLSearchParams({
+                    limit: historyPageSize.toString(),
+                    offset: ((historyPage.value - 1) * historyPageSize).toString(),
+                });
                 if (historyFilter.value !== null) params.set('status', historyFilter.value);
+                if (historyTraitFilter.value) params.set('trait_filter', historyTraitFilter.value);
+                if (historyAttributeFilter.value) {
+                    params.set('attr_filters', JSON.stringify([historyAttributeFilter.value]));
+                }
+                if (historySchemeFilter.value) params.set('scheme_filter', historySchemeFilter.value);
                 const res = await fetch(`/api/history?${params}`);
                 const data = await res.json();
                 historyRecords.value = data.records || [];
                 historyTotal.value = data.total || 0;
+                // 更新方案名称列表（用于筛选下拉）
+                const names = new Set();
+                historyRecords.value.forEach(r => { if (r.scheme_name) names.add(r.scheme_name); });
+                if (data.scheme_names) data.scheme_names.forEach(n => names.add(n));
+                historySchemeNames.value = [...names].sort();
             } catch (e) {
                 console.error('加载历史失败:', e);
             }
@@ -705,15 +919,43 @@ createApp({
             }
         }
 
+        async function confirmClearHistory() {
+            if (!confirm('确定要清空所有历史记录吗？此操作不可撤销。')) return;
+            try {
+                const res = await fetch('/api/history', { method: 'DELETE' });
+                const data = await res.json();
+                historyRecords.value = [];
+                historyTotal.value = 0;
+            } catch (e) {
+                console.error('清空历史失败:', e);
+            }
+        }
+
         // 切换到历史tab时加载
         watch(currentTab, (tab) => {
             if (tab === 'history') loadHistory();
-            if (tab === 'analyze') {
-                fetch('/api/files').then(r => r.json()).then(d => imageFiles.value = d.files || []);
-            }
+            if (tab === 'analyze') loadFiles();
         });
 
-        onMounted(() => { loadConfig(); loadSchemes(); });
+        onMounted(async () => {
+            await loadConfig();
+            await loadSchemes();
+            // 恢复上次选中的方案
+            const saved = localStorage.getItem('selectedSchemeId');
+            if (saved) {
+                const id = parseInt(saved);
+                if (schemes.value.some(s => s.id === id)) {
+                    selectedSchemeId.value = id;
+                }
+            }
+            prevSchemeId.value = selectedSchemeId.value;
+        });
+
+        // 保存选中状态
+        watch(selectedSchemeId, (val) => {
+            if (val) localStorage.setItem('selectedSchemeId', val);
+            else localStorage.removeItem('selectedSchemeId');
+        });
 
         return {
             currentTab, tabs,
@@ -725,12 +967,12 @@ createApp({
             getTraitDef, traitEffectDescFor,
             onGroupTraitChange, onGroupTraitLevelChange,
             loadConfig,
-            analyzeFilename, analyzing, analyzeResult, imageFiles,
+            analyzeFilename, analyzing, analyzeResult, imageFiles, loadFiles,
             analyzeImage,
-            historyRecords, historyTotal, historyFilter,
-            loadHistory, deleteHistory,
-            schemes, selectedSchemeId, showSaveScheme, showSchemeMgr, newSchemeName,
-            loadSchemes, doSaveScheme, loadScheme, deleteSchemeItem,
+            historyRecords, historyTotal, historyFilter, historyTraitFilter, historyAttributeFilter, showAttributeFilter, historyPage, historyPageSize, historySchemeFilter, historySchemeNames,
+            loadHistory, deleteHistory, confirmClearHistory,
+            schemes, selectedSchemeId, showSaveScheme, showNewScheme, showSchemeMgr, newSchemeName, blankSchemeName,
+            loadSchemes, doSaveScheme, doCreateBlankScheme, loadScheme, deleteSchemeItem, onSchemeSelect, updateScheme,
         };
     }
 }).mount('#app');

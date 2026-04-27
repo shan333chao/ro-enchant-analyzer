@@ -11,7 +11,7 @@ DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "enchantment.db"
 def get_db():
     """获取数据库连接"""
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys = ON")
@@ -67,10 +67,18 @@ def init_db():
         );
     """)
     conn.commit()
+    # 迁移：添加 config_snapshot 列
+    try:
+        conn.execute("ALTER TABLE analysis_history ADD COLUMN config_snapshot TEXT")
+    except Exception:
+        pass  # 列已存在
+    # 迁移：添加 scheme_name 列
+    try:
+        conn.execute("ALTER TABLE analysis_history ADD COLUMN scheme_name TEXT")
+    except Exception:
+        pass
+    conn.commit()
     conn.close()
-
-
-# === 规则组 CRUD ===
 
 def get_rule_groups() -> list[dict]:
     """获取所有规则组（含组内规则）"""
@@ -239,6 +247,23 @@ def save_scheme(name: str, data: dict) -> dict:
     return dict(row)
 
 
+def update_scheme(scheme_id: int, data: dict) -> dict | None:
+    """更新方案数据"""
+    conn = get_db()
+    row = conn.execute("SELECT id FROM config_schemes WHERE id = ?", (scheme_id,)).fetchone()
+    if not row:
+        conn.close()
+        return None
+    conn.execute(
+        "UPDATE config_schemes SET data = ? WHERE id = ?",
+        (json.dumps(data, ensure_ascii=False), scheme_id),
+    )
+    conn.commit()
+    row = conn.execute("SELECT id, name, created_at FROM config_schemes WHERE id = ?", (scheme_id,)).fetchone()
+    conn.close()
+    return dict(row)
+
+
 def delete_scheme(scheme_id: int) -> bool:
     """删除配置方案"""
     conn = get_db()
@@ -247,6 +272,24 @@ def delete_scheme(scheme_id: int) -> bool:
     affected = conn.total_changes
     conn.close()
     return affected > 0
+
+
+def clear_and_save_scheme(name: str) -> dict:
+    """清空当前配置并保存为新方案"""
+    conn = get_db()
+    # 清空所有规则组和组内规则
+    conn.execute("DELETE FROM group_rules")
+    conn.execute("DELETE FROM rule_groups")
+    conn.commit()
+    # 创建新方案（空）
+    conn.execute(
+        "INSERT INTO config_schemes (name, data) VALUES (?, ?)",
+        (name, json.dumps({"groups": []}, ensure_ascii=False)),
+    )
+    conn.commit()
+    row = conn.execute("SELECT id, name, created_at FROM config_schemes ORDER BY id DESC LIMIT 1").fetchone()
+    conn.close()
+    return dict(row)
 
 
 def load_scheme_to_config(scheme_id: int) -> dict | None:
@@ -317,10 +360,12 @@ def add_analysis_history(
     status: int,
     reason: str,
     matched_rules: list[dict] | None = None,
+    config_snapshot: list[dict] | None = None,
+    scheme_name: str | None = None,
 ) -> dict:
     conn = get_db()
     conn.execute(
-        "INSERT INTO analysis_history (filename, attributes, trait, status, reason, matched_rules) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO analysis_history (filename, attributes, trait, status, reason, matched_rules, config_snapshot, scheme_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (
             filename,
             json.dumps(attributes, ensure_ascii=False),
@@ -328,6 +373,8 @@ def add_analysis_history(
             status,
             reason,
             json.dumps(matched_rules, ensure_ascii=False) if matched_rules else None,
+            json.dumps(config_snapshot, ensure_ascii=False) if config_snapshot else None,
+            scheme_name,
         ),
     )
     conn.commit()
@@ -336,35 +383,107 @@ def add_analysis_history(
     return dict(row)
 
 
-def get_analysis_history(limit: int = 50, offset: int = 0, status: int | None = None) -> list[dict]:
+def get_last_loaded_scheme_name() -> str | None:
+    """获取最近一次加载的方案名称（不为空）"""
     conn = get_db()
-    if status is not None:
-        rows = conn.execute(
-            "SELECT * FROM analysis_history WHERE status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            (status, limit, offset),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM analysis_history ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            (limit, offset),
-        ).fetchall()
+    # 查询最近一次插入的记录
+    rows = conn.execute("""
+        SELECT scheme_name FROM analysis_history
+        WHERE scheme_name IS NOT NULL
+        ORDER BY id DESC
+        LIMIT 1
+    """).fetchall()
     conn.close()
+    # 返回第一个非空的方案名
+    for row in rows:
+        if row["scheme_name"]:
+            return row["scheme_name"]
+    return None
+
+
+def get_analysis_history(
+    limit: int = 50,
+    offset: int = 0,
+    status: int | None = None,
+    trait_filter: str | None = None,
+    attr_filters: list[str] | None = None,
+    scheme_filter: str | None = None,
+) -> list[dict]:
+    conn = get_db()
+    conditions = []
+    params = []
+
+    if status is not None:
+        conditions.append("status = ?")
+        params.append(status)
+
+    if trait_filter:
+        conditions.append("trait IS NOT NULL")
+        conditions.append("json_extract(trait, '$.name') = ?")
+        params.append(trait_filter)
+
+    if attr_filters:
+        for attr_name in attr_filters:
+            conditions.append(
+                "EXISTS (SELECT 1 FROM json_each(attributes) WHERE json_extract(value, '$.name') = ?)"
+            )
+            params.append(attr_name)
+
+    if scheme_filter:
+        conditions.append("scheme_name = ?")
+        params.append(scheme_filter)
+
+    where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+    query = f"SELECT * FROM analysis_history{where} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
+
+    rows = conn.execute(query, params).fetchall()
+    conn.close()
+
     result = []
     for r in rows:
         item = dict(r)
         item["attributes"] = json.loads(item["attributes"])
         item["trait"] = json.loads(item["trait"]) if item["trait"] else None
         item["matched_rules"] = json.loads(item["matched_rules"]) if item["matched_rules"] else []
+        item["config_snapshot"] = json.loads(item["config_snapshot"]) if item.get("config_snapshot") else []
         result.append(item)
     return result
 
 
-def get_history_count(status: int | None = None) -> int:
+def get_history_count(
+    status: int | None = None,
+    trait_filter: str | None = None,
+    attr_filters: list[str] | None = None,
+    scheme_filter: str | None = None,
+) -> int:
     conn = get_db()
+    conditions = []
+    params = []
+
     if status is not None:
-        row = conn.execute("SELECT COUNT(*) as cnt FROM analysis_history WHERE status = ?", (status,)).fetchone()
-    else:
-        row = conn.execute("SELECT COUNT(*) as cnt FROM analysis_history").fetchone()
+        conditions.append("status = ?")
+        params.append(status)
+
+    if trait_filter:
+        conditions.append("trait IS NOT NULL")
+        conditions.append("json_extract(trait, '$.name') = ?")
+        params.append(trait_filter)
+
+    if attr_filters:
+        for attr_name in attr_filters:
+            conditions.append(
+                "EXISTS (SELECT 1 FROM json_each(attributes) WHERE json_extract(value, '$.name') = ?)"
+            )
+            params.append(attr_name)
+
+    if scheme_filter:
+        conditions.append("scheme_name = ?")
+        params.append(scheme_filter)
+
+    where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+    query = f"SELECT COUNT(*) as cnt FROM analysis_history{where}"
+    row = conn.execute(query, params).fetchone()
     conn.close()
     return row["cnt"]
 
@@ -376,3 +495,26 @@ def delete_analysis_history(history_id: int) -> bool:
     affected = conn.total_changes
     conn.close()
     return affected > 0
+
+
+def clear_analysis_history() -> int:
+    """清空所有历史记录，返回删除条数和文件名列表"""
+    conn = get_db()
+    rows = conn.execute("SELECT DISTINCT filename FROM analysis_history").fetchall()
+    count = conn.execute("SELECT COUNT(*) FROM analysis_history").fetchone()[0]
+    conn.execute("DELETE FROM analysis_history")
+    conn.commit()
+    conn.close()
+    filenames = [r["filename"] for r in rows]
+    return count, filenames
+
+
+def get_distinct_scheme_names() -> list[str]:
+    """获取历史记录中所有不重复的方案名称"""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT DISTINCT scheme_name FROM analysis_history WHERE scheme_name IS NOT NULL ORDER BY scheme_name"
+    ).fetchall()
+    conn.close()
+    return [r["scheme_name"] for r in rows]
+

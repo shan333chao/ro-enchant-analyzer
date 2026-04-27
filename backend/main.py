@@ -1,7 +1,6 @@
-"""FastAPI 入口 - 附魔分析系统API"""
-
 import os
 import sys
+import json
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -16,9 +15,11 @@ from database import (
     get_rule_groups, create_rule_group, update_rule_group, delete_rule_group,
     update_rule_group_trait,
     add_group_rule, update_group_rule, delete_group_rule,
-    get_schemes, get_scheme, save_scheme, delete_scheme, load_scheme_to_config,
+    get_schemes, get_scheme, save_scheme, update_scheme, delete_scheme, load_scheme_to_config, clear_and_save_scheme,
     add_analysis_history, get_analysis_history, get_history_count,
-    delete_analysis_history,
+    delete_analysis_history, clear_analysis_history,
+    get_last_loaded_scheme_name,
+    get_distinct_scheme_names,
 )
 from ocr_engine import recognize_image
 from matcher import match_enchantment
@@ -39,18 +40,22 @@ FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
 if os.path.exists(FRONTEND_DIR):
     app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 
+IMAGE_DIR = os.path.join(os.path.dirname(__file__), "..")
+
+@app.get("/api/images/{filename}")
+def serve_image(filename: str):
+    filepath = os.path.join(IMAGE_DIR, filename)
+    if not os.path.exists(filepath):
+        raise HTTPException(404, detail="图片不存在")
+    return FileResponse(filepath)
 
 @app.on_event("startup")
 def startup():
     init_db()
 
-
-# ===== 前端页面 =====
-
 @app.get("/")
 def index():
     return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
-
 
 # ===== 属性定义 API =====
 
@@ -59,12 +64,10 @@ def api_attribute_definitions():
     """获取所有属性定义（含取值范围和预设）"""
     return ATTRIBUTE_DEFINITIONS
 
-
 @app.get("/api/traits/definitions")
 def api_trait_definitions():
     """获取所有组合特性定义"""
     return [{"name": k, **v} for k, v in TRAIT_DEFINITIONS.items()]
-
 
 # ===== 规则组 API =====
 
@@ -158,9 +161,8 @@ def api_delete_group_rule(group_id: int, rule_id: int):
     """删除组内规则"""
     ok = delete_group_rule(rule_id)
     if not ok:
-        raise HTTPException(404, "规则不存在")
+        raise HTTPException(404, "规则组不存在")
     return {"ok": True}
-
 
 # ===== 配置方案 API =====
 
@@ -186,6 +188,7 @@ def api_get_scheme(scheme_id: int):
 @app.post("/api/schemes")
 def api_save_scheme(req: SaveSchemeRequest):
     """将当前配置保存为新方案"""
+    """将当前配置保存为新方案"""
     groups = get_rule_groups()
     # 序列化：只保留规则组名+特性+规则内容，去掉id
     scheme_data = {
@@ -197,12 +200,19 @@ def api_save_scheme(req: SaveSchemeRequest):
                 "rules": [
                     {"attribute_name": r["attribute_name"], "threshold": r["threshold"]}
                     for r in g["rules"]
-                ],
+                ]
             }
             for g in groups
-        ],
+        ]
     }
     scheme = save_scheme(req.name, scheme_data)
+    return {"scheme": scheme}
+
+
+@app.post("/api/schemes/blank")
+def api_create_blank_scheme(req: SaveSchemeRequest):
+    """清空当前配置并保存为新方案"""
+    scheme = clear_and_save_scheme(req.name)
     return {"scheme": scheme}
 
 
@@ -215,6 +225,31 @@ def api_load_scheme(scheme_id: int):
     return {"ok": True, "data": result}
 
 
+@app.put("/api/schemes/{scheme_id}")
+def api_update_scheme(scheme_id: int):
+    """更新方案为当前配置"""
+    groups = get_rule_groups()
+    # 序列化：只保留规则组名+特性+规则内容，去掉id
+    scheme_data = {
+        "groups": [
+            {
+                "name": g["name"],
+                "trait_name": g.get("trait_name"),
+                "trait_level": g.get("trait_level", 4),
+                "rules": [
+                    {"attribute_name": r["attribute_name"], "threshold": r["threshold"]}
+                    for r in g["rules"]
+                ]
+            }
+            for g in groups
+        ]
+    }
+    result = update_scheme(scheme_id, scheme_data)
+    if not result:
+        raise HTTPException(404, "方案不存在")
+    return {"ok": True, "scheme": result}
+
+
 @app.delete("/api/schemes/{scheme_id}")
 def api_delete_scheme(scheme_id: int):
     """删除配置方案"""
@@ -223,39 +258,52 @@ def api_delete_scheme(scheme_id: int):
         raise HTTPException(404, "方案不存在")
     return {"ok": True}
 
-
 # ===== 分析 API =====
 
 class AnalyzeRequest(BaseModel):
     filename: str
+    scheme_name: str | None = None
 
 
 @app.get("/api/enchantment/analyze")
-def api_analyze_get(filename: str):
+def api_analyze_get(filename: str, scheme_name: str | None = None):
     """分析附魔截图（GET方式）"""
-    return _do_analyze(filename)
+    return _do_analyze(filename, scheme_name)
 
 
 @app.post("/api/enchantment/analyze")
 def api_analyze(req: AnalyzeRequest):
     """分析附魔截图（POST方式）"""
-    return _do_analyze(req.filename)
+    return _do_analyze(req.filename, req.scheme_name)
 
 
-def _do_analyze(filename: str):
+def _do_analyze(filename: str, scheme_name: str | None = None):
     """分析附魔截图核心逻辑"""
+    # 当未传递scheme_name时，使用最近加载的方案
+    if scheme_name is None:
+        scheme_name = get_last_loaded_scheme_name()
     try:
         ocr_result = recognize_image(filename)
     except FileNotFoundError as e:
         raise HTTPException(404, str(e))
     except Exception as e:
         raise HTTPException(500, f"OCR识别失败: {str(e)}")
-
     # 匹配判定
     match_result = match_enchantment(ocr_result["attributes"], ocr_result["trait"])
-
+    # 获取当前规则组配置快照
+    current_groups = get_rule_groups()
+    config_snapshot = [
+        {
+            "name": g["name"],
+            "trait_name": g.get("trait_name"),
+            "trait_level": g.get("trait_level", 4),
+            "rules": [{"attribute_name": r["attribute_name"], "threshold": r["threshold"]} for r in g["rules"]],
+        }
+        for g in current_groups
+    ]
     # 记录到历史
     try:
+        print(f"DEBUG: Analyzing {filename} with scheme_name={repr(scheme_name)}")
         add_analysis_history(
             filename=filename,
             attributes=ocr_result["attributes"],
@@ -263,10 +311,11 @@ def _do_analyze(filename: str):
             status=match_result["status"],
             reason=match_result["reason"],
             matched_rules=match_result["matched_details"],
+            config_snapshot=config_snapshot,
+            scheme_name=scheme_name,
         )
     except Exception:
         pass  # 历史记录失败不影响结果
-
     return {
         "status": match_result["status"],
         "attributes": ocr_result["attributes"],
@@ -276,17 +325,33 @@ def _do_analyze(filename: str):
         "trait_match": match_result["trait_match"],
         "matched_group": match_result["matched_group"],
         "raw_text": ocr_result["raw_text"],
+        "config_snapshot": config_snapshot,
+        "scheme_name": scheme_name,
     }
-
 
 # ===== 历史记录 API =====
 
 @app.get("/api/history")
-def api_get_history(limit: int = 50, offset: int = 0, status: int | None = None):
-    """获取分析历史"""
-    records = get_analysis_history(limit=limit, offset=offset, status=status)
-    total = get_history_count(status=status)
-    return {"records": records, "total": total}
+def api_get_history(
+    limit: int = 50,
+    offset: int = 0,
+    status: int | None = None,
+    trait_filter: str | None = None,
+    attr_filters: str | None = None,
+    scheme_filter: str | None = None,
+):
+    """获取分析历史（支持特性/属性/方案筛选）"""
+    parsed_attr_filters = json.loads(attr_filters) if attr_filters else None
+    records = get_analysis_history(
+        limit=limit, offset=offset, status=status,
+        trait_filter=trait_filter, attr_filters=parsed_attr_filters,
+        scheme_filter=scheme_filter,
+    )
+    total = get_history_count(
+        status=status, trait_filter=trait_filter, attr_filters=parsed_attr_filters,
+        scheme_filter=scheme_filter,
+    )
+    return {"records": records, "total": total, "scheme_names": get_distinct_scheme_names()}
 
 
 @app.delete("/api/history/{history_id}")
@@ -296,7 +361,6 @@ def api_delete_history(history_id: int):
     if not ok:
         raise HTTPException(404, "记录不存在")
     return {"ok": True}
-
 
 # ===== 文件列表 API =====
 

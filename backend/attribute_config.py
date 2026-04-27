@@ -79,7 +79,40 @@ NAME_ALIASES = {
     "定身扺抗": "定身抵抗",
     "恐惧扺抗": "恐惧抵抗",
     "诅咒扺抗": "诅咒抵抗",
+    # OCR可能漏掉%号（MaxHp/MaxSp 同时有固定值和百分比值，不能互转）
+    "爆伤": "爆伤%",
+    "爆伤减免": "爆伤减免%",
+    "治疗加成": "治疗加成%",
+    "受治疗加成": "受治疗加成%",
+    "物伤加成": "物伤加成%",
+    "物伤减免": "物伤减免%",
+    "装备攻速": "装备攻速%",
+    # OCR字形混淆
+    "幸邉": "幸运",
 }
+
+# 值范围消歧义映射：OCR可能把多个不同属性读成同一个错误文字
+# 根据属性值范围判断实际属性名
+AMBIGUOUS_OCR_NAMES = {
+    "母侣": ["命中", "幸运"],  # 命中(5~30) vs 幸运(4~8)，值<=4→幸运
+}
+
+
+def resolve_attribute_name(raw_name: str, value: float | None = None) -> str:
+    """解析OCR识别的属性名，处理别名。支持值范围消歧义。"""
+    # 先查确定性别名
+    if raw_name in NAME_ALIASES:
+        return NAME_ALIASES[raw_name]
+    # 查歧义别名，用值范围消歧
+    if raw_name in AMBIGUOUS_OCR_NAMES and value is not None:
+        candidates = AMBIGUOUS_OCR_NAMES[raw_name]
+        for name in candidates:
+            cfg = ATTRIBUTE_DEFINITIONS.get(name)
+            if cfg and cfg["min"] <= value <= cfg["max"]:
+                return name
+        # 值不在任何范围内，返回第一个候选
+        return candidates[0]
+    return raw_name
 
 def get_attribute_names():
     """获取所有属性名列表"""
@@ -88,7 +121,3 @@ def get_attribute_names():
 def get_attribute_config(name: str) -> dict:
     """获取属性配置"""
     return ATTRIBUTE_DEFINITIONS.get(name)
-
-def resolve_attribute_name(raw_name: str) -> str:
-    """解析OCR识别的属性名，处理别名"""
-    return NAME_ALIASES.get(raw_name, raw_name)
