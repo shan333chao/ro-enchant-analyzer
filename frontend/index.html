@@ -504,6 +504,34 @@
         </div>
     </div>
 
+    <!-- ==================== 设置页 ==================== -->
+    <div v-if="currentTab === 'settings'">
+        <div class="max-w-2xl mx-auto space-y-6">
+            <div class="bg-[#16213e] rounded-xl p-6 border border-[#f59e0b]/20">
+                <h2 class="text-lg font-bold text-[#f59e0b] mb-4">系统设置</h2>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-2">截图路径</label>
+                        <div class="flex gap-2">
+                            <input v-model="settingsImageDir" type="text"
+                                placeholder="留空使用默认路径"
+                                class="flex-1 bg-[#1a1a2e] border border-gray-600 rounded-lg px-3 py-2 text-sm focus:border-[#f59e0b] focus:outline-none" />
+                            <button @click="saveSettings"
+                                class="bg-[#f59e0b] text-black px-4 py-2 rounded-lg text-sm font-bold hover:bg-[#d97706] transition-colors">
+                                保存
+                            </button>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-1">
+                            默认路径: {{ settingsDefaultDir }}
+                        </p>
+                        <p v-if="settingsSaved" class="text-xs text-green-400 mt-1">保存成功</p>
+                        <p v-if="settingsError" class="text-xs text-red-400 mt-1">{{ settingsError }}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
 <script>
 const { createApp, ref, reactive, computed, onMounted, watch } = Vue;
 
@@ -514,6 +542,7 @@ createApp({
             { key: 'config', label: '配置' },
             { key: 'analyze', label: '分析' },
             { key: 'history', label: '历史' },
+            { key: 'settings', label: '设置' },
         ];
 
         // === 属性定义 ===
@@ -957,6 +986,44 @@ createApp({
             else localStorage.removeItem('selectedSchemeId');
         });
 
+        // === 设置 ===
+        const settingsImageDir = ref('');
+        const settingsDefaultDir = ref('');
+        const settingsSaved = ref(false);
+        const settingsError = ref('');
+
+        async function loadSettings() {
+            try {
+                const res = await fetch('/api/settings');
+                const data = await res.json();
+                settingsImageDir.value = data.image_dir || '';
+                settingsDefaultDir.value = data.default_image_dir || '';
+            } catch (e) {}
+        }
+
+        async function saveSettings() {
+            settingsSaved.value = false;
+            settingsError.value = '';
+            try {
+                const res = await fetch('/api/settings', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image_dir: settingsImageDir.value }),
+                });
+                if (!res.ok) {
+                    const data = await res.json();
+                    settingsError.value = data.detail || '保存失败';
+                    return;
+                }
+                settingsSaved.value = true;
+                loadFiles();
+            } catch (e) {
+                settingsError.value = '网络错误';
+            }
+        }
+
+        watch(currentTab, (tab) => { if (tab === 'settings') loadSettings(); });
+
         return {
             currentTab, tabs,
             attributeNames, attributeConfigs,
@@ -973,6 +1040,7 @@ createApp({
             loadHistory, deleteHistory, confirmClearHistory,
             schemes, selectedSchemeId, showSaveScheme, showNewScheme, showSchemeMgr, newSchemeName, blankSchemeName,
             loadSchemes, doSaveScheme, doCreateBlankScheme, loadScheme, deleteSchemeItem, onSchemeSelect, updateScheme,
+            settingsImageDir, settingsDefaultDir, settingsSaved, settingsError, saveSettings,
         };
     }
 }).mount('#app');
