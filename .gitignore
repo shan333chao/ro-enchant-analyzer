@@ -7,6 +7,14 @@ __pycache__/
 # Database (runtime data)
 *.db
 
+# Game screenshots
+fumo_*.png
+debug_*.txt
+
+# Design / MCP
+design/
+.playwright-mcp/
+
 # OMC / Claude state
 .omc/
 .claude/
