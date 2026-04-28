@@ -1,0 +1,1049 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RO 附魔分析系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap');
+        body { font-family: 'Noto Sans SC', sans-serif; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #1a1a2e; }
+        ::-webkit-scrollbar-thumb { background: #f59e0b; border-radius: 3px; }
+        input[type="range"] {
+            -webkit-appearance: none; appearance: none;
+            height: 8px; background: #374151; border-radius: 4px; outline: none; width: 100%;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none; appearance: none;
+            width: 20px; height: 20px; background: #f59e0b; border-radius: 50%; cursor: pointer;
+            box-shadow: 0 0 10px rgba(245,158,11,0.5);
+        }
+        input[type="range"]::-moz-range-thumb {
+            width: 20px; height: 20px; background: #f59e0b; border-radius: 50%; cursor: pointer;
+            box-shadow: 0 0 10px rgba(245,158,11,0.5); border: none;
+        }
+        .fade-enter-active, .fade-leave-active { transition: opacity 0.2s; }
+        .fade-enter-from, .fade-leave-to { opacity: 0; }
+    </style>
+</head>
+<body class="bg-[#1a1a2e] text-white min-h-screen">
+<div id="app" class="p-4 max-w-5xl mx-auto">
+
+    <!-- 导航栏 -->
+    <div class="flex items-center justify-between mb-6 border-b border-[#f59e0b]/30 pb-4">
+        <h1 class="text-xl font-bold text-[#f59e0b]">RO 附魔分析系统</h1>
+        <div class="flex gap-2">
+            <button v-for="tab in tabs" :key="tab.key"
+                @click="currentTab = tab.key"
+                :class="currentTab === tab.key
+                    ? 'bg-[#f59e0b] text-black font-bold'
+                    : 'bg-[#374151] hover:bg-[#4b5563]'"
+                class="px-4 py-2 rounded-lg transition-colors text-sm">
+                {{ tab.label }}
+            </button>
+        </div>
+    </div>
+
+    <!-- ==================== 配置页 ==================== -->
+    <div v-if="currentTab === 'config'">
+
+        <!-- 配置方案栏 -->
+        <div class="bg-[#16213e] border border-[#10b981]/30 rounded-lg p-4 mb-6">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <span class="text-sm text-gray-400">配置方案:</span>
+                    <select v-model="selectedSchemeId"
+                        @change="onSchemeSelect"
+                        class="bg-[#374151] border border-[#10b981]/30 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-[#10b981] min-w-[160px]">
+                        <option :value="null">-- 当前配置 --</option>
+                        <option v-for="s in schemes" :key="s.id" :value="s.id">{{ s.name }}</option>
+                    </select>
+                    <button v-if="selectedSchemeId"
+                        @click="updateScheme"
+                        class="px-3 py-1.5 bg-[#f59e0b] hover:bg-[#d97706] text-black rounded-lg text-sm font-medium transition-colors">
+                        更新方案
+                    </button>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button @click="showSaveScheme = true"
+                        class="px-3 py-1.5 bg-[#374151] hover:bg-[#4b5563] rounded-lg text-sm transition-colors">
+                        保存为新方案
+                    </button>
+                    <button @click="showNewScheme = true"
+                        class="px-3 py-1.5 bg-[#ef4444] hover:bg-[#dc2626] text-black rounded-lg text-sm transition-colors">
+                        新建空白方案
+                    </button>
+                    <button @click="showSchemeMgr = true; loadSchemes()"
+                        class="px-3 py-1.5 bg-[#374151] hover:bg-[#4b5563] rounded-lg text-sm transition-colors">
+                        方案管理
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 保存方案弹窗 -->
+        <div v-if="showSaveScheme" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" @click.self="showSaveScheme = false">
+            <div class="bg-[#16213e] border border-[#10b981]/30 rounded-lg p-6 w-96">
+                <h3 class="text-lg font-bold text-[#10b981] mb-4">保存为新方案</h3>
+                <input type="text" v-model="newSchemeName" placeholder="方案名称（如：武器流）"
+                    class="w-full bg-[#374151] border border-[#f59e0b]/30 rounded-lg px-3 py-2 text-white text-sm mb-4 focus:outline-none focus:border-[#f59e0b]">
+                <div class="flex gap-2">
+                    <button @click="doSaveScheme" :disabled="!newSchemeName.trim()"
+                        :class="!newSchemeName.trim() ? 'opacity-50 cursor-not-allowed' : ''"
+                        class="flex-1 py-2 bg-[#10b981] hover:bg-[#059669] text-black rounded-lg font-medium transition-colors">
+                        保存
+                    </button>
+                    <button @click="showSaveScheme = false"
+                        class="px-4 py-2 bg-[#374151] hover:bg-[#4b5563] rounded-lg transition-colors">
+                        取消
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 新建空白方案弹窗 -->
+        <div v-if="showNewScheme" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" @click.self="showNewScheme = false">
+            <div class="bg-[#16213e] border border-[#ef4444]/30 rounded-lg p-6 w-96">
+                <h3 class="text-lg font-bold text-[#ef4444] mb-4">新建空白方案</h3>
+                <input type="text" v-model="blankSchemeName" placeholder="方案名称（如：武器流）"
+                    class="w-full bg-[#374151] border border-[#f59e0b]/30 rounded-lg px-3 py-2 text-white text-sm mb-4 focus:outline-none focus:border-[#f59e0b]">
+                <div class="flex gap-2">
+                    <button @click="doCreateBlankScheme" :disabled="!blankSchemeName.trim()"
+                        :class="!blankSchemeName.trim() ? 'opacity-50 cursor-not-allowed' : ''"
+                        class="flex-1 py-2 bg-[#ef4444] hover:bg-[#dc2626] text-black rounded-lg font-medium transition-colors">
+                        创建
+                    </button>
+                    <button @click="showNewScheme = false"
+                        class="px-4 py-2 bg-[#374151] hover:bg-[#4b5563] rounded-lg transition-colors">
+                        取消
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 方案管理弹窗 -->
+        <div v-if="showSchemeMgr" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" @click.self="showSchemeMgr = false">
+            <div class="bg-[#16213e] border border-[#10b981]/30 rounded-lg p-6 w-[420px]">
+                <h3 class="text-lg font-bold text-[#10b981] mb-4">配置方案管理</h3>
+                <div v-if="schemes.length === 0" class="text-center py-6 text-gray-500">暂无保存的方案</div>
+                <div v-else class="space-y-2 max-h-[400px] overflow-y-auto mb-4">
+                    <div v-for="s in schemes" :key="s.id"
+                        class="flex items-center justify-between bg-[#1a1a2e] p-3 rounded-lg">
+                        <div>
+                            <span class="font-medium text-sm">{{ s.name }}</span>
+                            <span class="text-xs text-gray-500 ml-2">{{ s.created_at }}</span>
+                        </div>
+                        <div class="flex gap-2">
+                            <button @click="loadScheme(s.id); showSchemeMgr = false"
+                                class="px-3 py-1 bg-[#10b981] hover:bg-[#059669] text-black rounded text-xs font-medium transition-colors">
+                                切换
+                            </button>
+                            <button @click="deleteSchemeItem(s.id)"
+                                class="px-3 py-1 bg-red-500/20 hover:bg-red-500/40 text-red-400 rounded text-xs transition-colors">
+                                删除
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <button @click="showSchemeMgr = false"
+                    class="w-full py-2 bg-[#374151] hover:bg-[#4b5563] rounded-lg transition-colors">
+                    关闭
+                </button>
+            </div>
+        </div>
+
+        <!-- 规则组配置 -->
+        <div class="mb-6">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-lg font-bold text-[#f59e0b]">属性规则组</h2>
+                <div class="flex items-center gap-3">
+                    <span class="text-xs text-gray-500">组内AND 组间OR</span>
+                    <button @click="createGroup"
+                        class="px-3 py-1.5 bg-[#8b5cf6] hover:bg-[#7c3aed] rounded-lg text-sm font-medium transition-colors">
+                        + 新建组
+                    </button>
+                </div>
+            </div>
+
+            <div v-if="ruleGroups.length === 0" class="bg-[#16213e] border border-[#f59e0b]/20 rounded-lg p-6 text-center text-gray-500">
+                暂无规则组，点击右上角新建
+            </div>
+
+            <!-- 规则组网格 -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div v-for="(group, gi) in ruleGroups" :key="group.id"
+                    class="bg-[#1a1a2e] border rounded-lg p-3"
+                    :class="group.trait_name ? 'border-[#f59e0b]/40' : 'border-[#8b5cf6]/30'">
+
+                    <!-- 组头部 -->
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center gap-1.5">
+                            <span class="text-[#8b5cf6] font-bold text-xs bg-[#8b5cf6]/20 rounded px-1.5 py-0.5">G{{ gi + 1 }}</span>
+                            <input type="text" :value="group.name"
+                                @change="renameGroup(group.id, $event.target.value)"
+                                class="bg-transparent border-b border-transparent hover:border-[#f59e0b]/50 focus:border-[#f59e0b] text-white text-sm font-medium outline-none px-1 py-0.5 w-24"
+                                placeholder="组名">
+                        </div>
+                        <button @click="deleteGroup(group.id)"
+                            class="text-red-400/40 hover:text-red-400 text-xs transition-colors">&#x2715;</button>
+                    </div>
+
+                    <!-- 组合特性选择 -->
+                    <div class="flex items-center gap-1.5 mb-2 flex-wrap">
+                        <span class="text-[10px] text-gray-500 shrink-0">特性:</span>
+                        <select :value="group.trait_name || ''"
+                            @change="onGroupTraitChange(group.id, $event.target.value)"
+                            class="bg-[#374151] border border-[#8b5cf6]/30 rounded px-1.5 py-0.5 text-[11px] text-white focus:outline-none focus:border-[#8b5cf6]">
+                            <option value="">-- 无 --</option>
+                            <option v-for="t in traitDefs" :key="t.name" :value="t.name">{{ t.name }} ({{ t.desc }})</option>
+                        </select>
+                        <template v-if="group.trait_name && getTraitDef(group.trait_name)">
+                            <select :value="group.trait_level || 4"
+                                @change="onGroupTraitLevelChange(group.id, group.trait_name, parseInt($event.target.value))"
+                                class="bg-[#374151] border border-[#f59e0b]/30 rounded px-1.5 py-0.5 text-[11px] text-white focus:outline-none">
+                                <option v-for="lv in [1,2,3,4]" :key="lv" :value="lv">Lv{{ lv }}</option>
+                            </select>
+                            <span class="text-[10px] text-[#f59e0b]">
+                                {{ traitEffectDescFor(group.trait_name, group.trait_level || 4) }}
+                            </span>
+                            <span class="text-[10px] text-gray-500">
+                                ({{ getTraitDef(group.trait_name).attrs.join('+') }})
+                            </span>
+                        </template>
+                    </div>
+
+                    <!-- 组内规则 - 紧凑标签式 -->
+                    <div class="flex flex-wrap gap-1.5 mb-2">
+                        <span v-for="rule in group.rules" :key="rule.id"
+                            class="inline-flex items-center gap-1 bg-[#262f4d] hover:bg-[#2d3654] rounded px-2 py-1 text-xs group/tag cursor-default">
+                            <span class="text-gray-300">{{ rule.attribute_name }}</span>
+                            <span class="text-[#f59e0b] font-medium">&ge;{{ rule.threshold }}</span>
+                            <button @click="deleteRule(group.id, rule.id)"
+                                class="text-red-400/40 hover:text-red-400 ml-0.5 transition-colors">&#x2715;</button>
+                        </span>
+                        <button @click="startAddRule(group.id)"
+                            class="inline-flex items-center gap-1 border border-dashed border-[#8b5cf6]/30 hover:border-[#8b5cf6] rounded px-2 py-1 text-[#8b5cf6] text-xs transition-colors">
+                            +添加
+                        </button>
+                    </div>
+
+                    <!-- 添加规则表单（内联折叠） -->
+                    <div v-if="addingToGroup === group.id" class="bg-[#262f4d] rounded p-2.5">
+                        <div class="flex items-center gap-2 mb-2">
+                            <select v-model="addForm.selectedAttr" @change="onAddFormAttrChange"
+                                class="flex-1 bg-[#374151] border border-[#f59e0b]/30 rounded px-2 py-1 text-white text-xs focus:outline-none focus:border-[#f59e0b]">
+                                <option v-for="name in attributeNames" :key="name" :value="name">{{ name }}</option>
+                            </select>
+                            <input type="number" :value="addForm.threshold"
+                                @input="addForm.threshold = parseFloat($event.target.value) || 0"
+                                :step="addFormConfig ? (addFormConfig.type === 'percent' || addFormConfig.type === 'resistance' ? 0.5 : 1) : 1"
+                                class="w-16 bg-[#374151] border border-[#f59e0b]/30 rounded px-2 py-1 text-white text-center text-xs focus:outline-none focus:border-[#f59e0b]">
+                        </div>
+                        <div class="mb-2" v-if="addFormConfig">
+                            <input type="range" :min="addFormConfig.min" :max="addFormConfig.max"
+                                :step="addFormConfig.type === 'percent' || addFormConfig.type === 'resistance' ? 0.5 : 1"
+                                v-model.number="addForm.threshold"
+                                style="height:5px">
+                        </div>
+                        <div class="flex items-center gap-1 mb-2" v-if="addFormConfig">
+                            <button v-for="(preset, idx) in addFormPresetLabels" :key="idx"
+                                @click="addForm.threshold = addFormPresetValues[idx]"
+                                :class="Math.abs(addForm.threshold - addFormPresetValues[idx]) < 0.01 ? 'bg-[#f59e0b] text-black font-bold' : 'bg-[#374151] hover:bg-[#4b5563]'"
+                                class="px-1.5 py-0.5 rounded text-[10px] transition-colors">
+                                {{ preset }}
+                            </button>
+                        </div>
+                        <div class="flex gap-1.5">
+                            <button @click="confirmAddRule(group.id)"
+                                class="flex-1 py-1.5 bg-[#8b5cf6] hover:bg-[#7c3aed] rounded text-xs font-medium transition-colors">
+                                确定
+                            </button>
+                            <button @click="addingToGroup = null"
+                                class="px-3 py-1.5 bg-[#374151] hover:bg-[#4b5563] rounded text-xs transition-colors">
+                                取消
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- ==================== 分析页 ==================== -->
+    <div v-if="currentTab === 'analyze'">
+        <div class="bg-[#16213e] border border-[#f59e0b]/30 rounded-lg p-5">
+            <h2 class="text-lg font-bold text-[#f59e0b] mb-4">图片分析</h2>
+
+            <!-- 文件输入 -->
+            <div class="flex items-center gap-3 mb-4">
+                <select v-model="analyzeFilename"
+                    class="flex-1 bg-[#374151] border border-[#f59e0b]/30 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-[#f59e0b]">
+                    <option value="">-- 选择图片 --</option>
+                    <option v-for="f in imageFiles" :key="f" :value="f">{{ f }}</option>
+                </select>
+                <button @click="loadFiles" class="px-3 py-2 bg-[#374151] hover:bg-[#4b5563] rounded-lg text-sm transition-colors" title="刷新图片列表">刷新</button>
+                <button @click="analyzeImage" :disabled="!analyzeFilename || analyzing"
+                    :class="!analyzeFilename || analyzing ? 'opacity-50 cursor-not-allowed' : ''"
+                    class="px-6 py-2 bg-[#8b5cf6] hover:bg-[#7c3aed] rounded-lg font-medium transition-colors">
+                    {{ analyzing ? '识别中...' : '分析' }}
+                </button>
+            </div>
+
+            <!-- 分析结果 -->
+            <div v-if="analyzeResult" class="bg-[#1a1a2e] rounded-lg p-4 mt-4">
+                <!-- 原图 -->
+                <div class="mb-4">
+                    <img :src="'/api/images/' + analyzeFilename" alt="原图"
+                        class="rounded-lg border border-[#374151] max-h-64 mx-auto">
+                </div>
+
+                <!-- 状态 -->
+                <div class="flex items-center gap-3 mb-4 pb-4 border-b border-[#374151]">
+                    <span class="text-2xl">{{ analyzeResult.status === 1 ? '✅' : '❌' }}</span>
+                    <div>
+                        <span :class="analyzeResult.status === 1 ? 'text-green-500' : 'text-red-500'" class="font-bold">
+                            {{ analyzeResult.status === 1 ? '保留' : '不保留' }}
+                        </span>
+                        <span class="text-gray-400 ml-2 text-sm">| {{ analyzeResult.reason }}</span>
+                    </div>
+                </div>
+
+                <!-- OCR属性 -->
+                <div class="mb-3">
+                    <h3 class="text-sm font-medium text-gray-400 mb-2">识别属性</h3>
+                    <div class="flex flex-wrap gap-2">
+                        <span v-for="attr in analyzeResult.attributes" :key="attr.name"
+                            class="bg-[#262f4d] px-3 py-1 rounded text-sm">
+                            {{ attr.name }} <span class="text-[#f59e0b]">{{ attr.value }}</span>
+                        </span>
+                    </div>
+                </div>
+
+                <!-- 组合特性 -->
+                <div v-if="analyzeResult.trait" class="mb-3">
+                    <h3 class="text-sm font-medium text-gray-400 mb-2">组合特性</h3>
+                    <span class="bg-[#8b5cf6]/20 border border-[#8b5cf6]/40 px-3 py-1 rounded text-sm">
+                        {{ analyzeResult.trait.name }}{{ analyzeResult.trait.level }}
+                        <span v-if="analyzeResult.trait_match" :class="analyzeResult.trait_match.matched ? 'text-green-400' : 'text-red-400'">
+                            ({{ analyzeResult.trait_match.matched ? '符合' : '不符' }})
+                        </span>
+                    </span>
+                </div>
+
+                <!-- 匹配详情 -->
+                <div v-if="analyzeResult.matched_details && analyzeResult.matched_details.length > 0" class="mb-3">
+                    <h3 class="text-sm font-medium text-gray-400 mb-2">匹配详情</h3>
+                    <div class="space-y-1">
+                        <div v-for="d in analyzeResult.matched_details" :key="d.name"
+                            class="flex items-center gap-2 text-sm">
+                            <span :class="d.matched ? 'text-green-400' : 'text-red-400'">{{ d.matched ? '✓' : '✗' }}</span>
+                            <span>{{ d.name }}</span>
+                            <span class="text-[#f59e0b]">{{ d.value ?? '未识别' }}</span>
+                            <span class="text-gray-500">&ge; {{ d.threshold }}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 原始文本 -->
+                <details class="mt-3">
+                    <summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-400">OCR原始文本</summary>
+                    <pre class="mt-2 text-xs text-gray-500 bg-[#262f4d] p-3 rounded whitespace-pre-wrap">{{ analyzeResult.raw_text }}</pre>
+                </details>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== 历史页 ==================== -->
+    <div v-if="currentTab === 'history'">
+        <div class="bg-[#16213e] border border-[#f59e0b]/30 rounded-lg p-5">
+            <!-- 标题 + 分页 -->
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-3">
+                    <h2 class="text-lg font-bold text-[#f59e0b]">分析历史</h2>
+                    <button v-if="historyTotal > 0" @click="confirmClearHistory"
+                        class="px-2.5 py-1 bg-red-500/20 hover:bg-red-500/40 text-red-400 text-xs rounded transition-colors">清空全部</button>
+                </div>
+                <div v-if="historyTotal > 0" class="flex items-center gap-3 text-xs text-gray-500">
+                    <span>共 {{ historyTotal }} 条</span>
+                    <button @click="historyPage > 1 && (historyPage--, loadHistory())"
+                        :class="historyPage > 1 ? 'hover:text-gray-300 cursor-pointer' : 'opacity-50 cursor-not-allowed'"
+                        class="px-3 py-1.5 bg-[#374151] rounded transition-colors">上一页</button>
+                    <span class="text-gray-400 font-medium">{{ historyPage }} / {{ Math.max(1, Math.ceil(historyTotal / historyPageSize)) }}</span>
+                    <button @click="(historyPage * historyPageSize) < historyTotal && (historyPage++, loadHistory())"
+                        :class="(historyPage * historyPageSize) < historyTotal ? 'hover:text-gray-300 cursor-pointer' : 'opacity-50 cursor-not-allowed'"
+                        class="px-3 py-1.5 bg-[#374151] rounded transition-colors">下一页</button>
+                </div>
+            </div>
+
+            <!-- 筛选工具栏 -->
+            <div class="flex items-center gap-3 mb-4 bg-[#1a1a2e] rounded-lg p-3">
+                <!-- 状态筛选 -->
+                <div class="flex items-center gap-1.5">
+                    <span class="text-xs text-gray-500">状态</span>
+                    <button @click="historyFilter = null; historyPage = 1; loadHistory()"
+                        :class="historyFilter === null ? 'bg-[#f59e0b] text-black font-bold' : 'bg-[#374151] hover:bg-[#4b5563]'"
+                        class="px-3 py-1.5 rounded text-xs transition-colors min-w-[48px]">全部</button>
+                    <button @click="historyFilter = 1; historyPage = 1; loadHistory()"
+                        :class="historyFilter === 1 ? 'bg-green-500 text-black font-bold' : 'bg-[#374151] hover:bg-[#4b5563]'"
+                        class="px-3 py-1.5 rounded text-xs transition-colors min-w-[48px]">保留</button>
+                    <button @click="historyFilter = 0; historyPage = 1; loadHistory()"
+                        :class="historyFilter === 0 ? 'bg-red-500 text-black font-bold' : 'bg-[#374151] hover:bg-[#4b5563]'"
+                        class="px-3 py-1.5 rounded text-xs transition-colors min-w-[48px]">不保留</button>
+                </div>
+
+                <div class="w-px h-6 bg-[#374151]"></div>
+
+                <!-- 特性筛选 -->
+                <div class="flex items-center gap-1.5">
+                    <span class="text-xs text-gray-500">特性</span>
+                    <select v-model="historyTraitFilter"
+                        @change="historyPage = 1; loadHistory()"
+                        class="bg-[#374151] border border-[#10b981]/30 rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-[#10b981] min-w-[100px]">
+                        <option value="">全部</option>
+                        <option v-for="t in traitDefs" :key="t.name" :value="t.name">{{ t.name }}</option>
+                    </select>
+                </div>
+
+                <div class="w-px h-6 bg-[#374151]"></div>
+
+                <!-- 方案筛选 -->
+                <div class="flex items-center gap-1.5">
+                    <span class="text-xs text-gray-500">方案</span>
+                    <select v-model="historySchemeFilter"
+                        @change="historyPage = 1; loadHistory()"
+                        class="bg-[#374151] border border-[#f59e0b]/30 rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-[#f59e0b] min-w-[100px]">
+                        <option value="">全部</option>
+                        <option v-for="s in historySchemeNames" :key="s" :value="s">{{ s }}</option>
+                    </select>
+                </div>
+
+                <div class="w-px h-6 bg-[#374151]"></div>
+
+                <!-- 属性筛选 -->
+                <div class="flex items-center gap-1.5 relative">
+                    <span class="text-xs text-gray-500">属性</span>
+                    <button @click="showAttributeFilter = !showAttributeFilter"
+                        class="px-2.5 py-1.5 bg-[#374151] hover:bg-[#4b5563] border border-[#8b5cf6]/30 rounded-lg text-xs transition-colors min-w-[100px] text-center">
+                        {{ historyAttributeFilter || '全部' }}
+                    </button>
+                    <!-- 属性选择弹窗 -->
+                    <div v-if="showAttributeFilter"
+                        class="absolute top-full left-0 mt-2 bg-[#262f4d] border border-[#374151] rounded-lg p-3 w-[360px] z-10">
+                        <div class="flex flex-wrap gap-x-3 gap-y-1.5">
+                            <label v-for="name in attributeNames" :key="name"
+                                class="flex items-center gap-1 text-xs text-gray-300 cursor-pointer whitespace-nowrap">
+                                <input type="radio" :value="name" v-model="historyAttributeFilter"
+                                    class="w-3.5 h-3.5 accent-[#f59e0b]">
+                                <span>{{ name }}</span>
+                            </label>
+                        </div>
+                        <div class="flex gap-2 mt-3 pt-2 border-t border-[#374151]">
+                            <button @click="historyPage = 1; loadHistory(); showAttributeFilter = false"
+                                class="flex-1 py-1.5 bg-[#8b5cf6] hover:bg-[#7c3aed] rounded-lg text-xs text-white font-medium">确定</button>
+                            <button @click="historyAttributeFilter = ''; historyTraitFilter = ''; historySchemeFilter = ''; historyPage = 1; loadHistory(); showAttributeFilter = false"
+                                class="px-4 py-1.5 bg-gray-500 hover:bg-gray-600 rounded-lg text-xs">重置</button>
+                            <button @click="showAttributeFilter = false"
+                                class="px-4 py-1.5 bg-[#374151] hover:bg-[#4b5563] rounded-lg text-xs">取消</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 刷新按钮 -->
+                <button @click="loadHistory()"
+                    class="px-3 py-1.5 bg-[#374151] hover:bg-[#4b5563] rounded-lg text-xs transition-colors">
+                    刷新
+                </button>
+            </div>
+
+            <div v-if="historyRecords.length === 0" class="text-center py-8 text-gray-500">暂无历史记录</div>
+
+            <!-- 历史记录列表容器（内部滚动） -->
+            <div class="max-h-[calc(100vh-200px)] overflow-y-auto">
+                <div class="space-y-3">
+                    <div v-for="record in historyRecords" :key="record.id"
+                        class="bg-[#1a1a2e] p-4 rounded-lg flex gap-3">
+                        <!-- 原图缩略图 -->
+                        <div class="w-44 h-[72px] flex-shrink-0 rounded-lg overflow-hidden bg-[#262f4d]">
+                            <img :src="'/api/images/' + record.filename" alt="原图"
+                                class="w-full h-full object-contain" loading="lazy">
+                        </div>
+                        <!-- 内容区 -->
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center justify-between mb-1">
+                                <div class="flex items-center gap-2">
+                                    <span>{{ record.status === 1 ? '✅' : '❌' }}</span>
+                                    <span class="font-medium text-sm truncate">{{ record.filename }}</span>
+                                    <span v-if="record.trait" class="text-[10px] bg-[#8b5cf6]/20 text-[#8b5cf6] px-1.5 py-0.5 rounded">
+                                        {{ record.trait.name }}{{ record.trait.level }}
+                                    </span>
+                                    <span v-if="record.scheme_name" class="text-[10px] bg-[#f59e0b]/20 text-[#f59e0b] px-1.5 py-0.5 rounded">
+                                        {{ record.scheme_name }}
+                                    </span>
+                                </div>
+                                <div class="flex items-center gap-2 flex-shrink-0">
+                                    <span class="text-xs text-gray-500">{{ record.created_at }}</span>
+                                    <button @click="deleteHistory(record.id)"
+                                        class="text-red-400/60 hover:text-red-400 text-xs transition-colors">删除</button>
+                                </div>
+                            </div>
+                            <p class="text-xs text-gray-500 mb-1 truncate">{{ record.reason }}</p>
+                            <div class="flex flex-wrap gap-1">
+                                <span v-for="attr in record.attributes" :key="attr.name"
+                                    class="bg-[#262f4d] px-2 py-0.5 rounded text-xs">
+                                    {{ attr.name }} <span class="text-[#f59e0b]">{{ attr.value }}</span>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== 设置页 ==================== -->
+    <div v-if="currentTab === 'settings'">
+        <div class="max-w-2xl mx-auto space-y-6">
+            <div class="bg-[#16213e] rounded-xl p-6 border border-[#f59e0b]/20">
+                <h2 class="text-lg font-bold text-[#f59e0b] mb-4">系统设置</h2>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-2">截图路径</label>
+                        <div class="flex gap-2">
+                            <input v-model="settingsImageDir" type="text"
+                                placeholder="留空使用默认路径"
+                                class="flex-1 bg-[#1a1a2e] border border-gray-600 rounded-lg px-3 py-2 text-sm focus:border-[#f59e0b] focus:outline-none" />
+                            <button @click="saveSettings"
+                                class="bg-[#f59e0b] text-black px-4 py-2 rounded-lg text-sm font-bold hover:bg-[#d97706] transition-colors">
+                                保存
+                            </button>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-1">
+                            默认路径: {{ settingsDefaultDir }}
+                        </p>
+                        <p v-if="settingsSaved" class="text-xs text-green-400 mt-1">保存成功</p>
+                        <p v-if="settingsError" class="text-xs text-red-400 mt-1">{{ settingsError }}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+const { createApp, ref, reactive, computed, onMounted, watch } = Vue;
+
+createApp({
+    setup() {
+        const currentTab = ref('config');
+        const tabs = [
+            { key: 'config', label: '配置' },
+            { key: 'analyze', label: '分析' },
+            { key: 'history', label: '历史' },
+            { key: 'settings', label: '设置' },
+        ];
+
+        // === 属性定义 ===
+        const attributeNames = ref([]);
+        const attributeConfigs = ref({});
+
+        // === 规则组 ===
+        const ruleGroups = ref([]);
+
+        // === 组合特性定义（只读，用于下拉） ===
+        const traitDefs = ref([]);
+
+        // === 添加规则表单 ===
+        const addingToGroup = ref(null);
+        const addForm = reactive({
+            selectedAttr: '',
+            threshold: 0,
+        });
+
+        const addFormConfig = computed(() => attributeConfigs.value[addForm.selectedAttr]);
+
+        const addFormPresetLabels = computed(() => {
+            const c = addFormConfig.value;
+            if (!c) return [];
+            return c.presets ? c.presets.map(p => p) : ['极差', '普通', '优秀', '极品'];
+        });
+
+        const addFormPresetValues = computed(() => {
+            const c = addFormConfig.value;
+            if (!c) return [];
+            if (c.presets) return c.presets;
+            return [c.min, Math.round((c.min + c.max) * 0.4 * 10) / 10, Math.round((c.min + c.max) * 0.7 * 10) / 10, c.max];
+        });
+
+        // === 分析 ===
+        const analyzeFilename = ref('');
+        const analyzing = ref(false);
+        const analyzeResult = ref(null);
+        const imageFiles = ref([]);
+
+        // === 历史 ===
+        const historyRecords = ref([]);
+        const historyTotal = ref(0);
+        const historyFilter = ref(null);
+        const historyTraitFilter = ref('');
+        const historyAttributeFilter = ref('');
+        const historySchemeFilter = ref('');
+        const historySchemeNames = ref([]);
+        const showAttributeFilter = ref(false);
+        const historyPage = ref(1);
+        const historyPageSize = 20;
+
+        // === 配置方案 ===
+        const schemes = ref([]);
+        const selectedSchemeId = ref(null);
+        const showSaveScheme = ref(false);
+        const showSchemeMgr = ref(false);
+        const newSchemeName = ref('');
+        const blankSchemeName = ref('');
+        const showNewScheme = ref(false);
+        const prevSchemeId = ref(null);
+        function getTraitDef(name) {
+            return traitDefs.value.find(t => t.name === name);
+        }
+
+        function traitEffectDescFor(traitName, level) {
+            const t = getTraitDef(traitName);
+            if (!t || !t.effect_base) return '';
+            const val = t.effect_base * level;
+            const valStr = val % 1 === 0 ? val.toString() : val.toFixed(1);
+            return `${t.desc} ${valStr}${t.effect_unit}`;
+        }
+
+        // === 配置方案操作 ===
+        async function loadSchemes() {
+            try {
+                const res = await fetch('/api/schemes');
+                const data = await res.json();
+                schemes.value = data.schemes || [];
+            } catch (e) {
+                console.error('加载方案失败:', e);
+            }
+        }
+
+        async function doSaveScheme() {
+            if (!newSchemeName.value.trim()) return;
+            try {
+                const res = await fetch('/api/schemes', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: newSchemeName.value.trim() }),
+                });
+                if (res.ok) {
+                    alert('方案已保存');
+                    showSaveScheme.value = false;
+                    newSchemeName.value = '';
+                    loadSchemes();
+                } else {
+                    const err = await res.json();
+                    alert('保存失败: ' + (err.detail || '未知错误'));
+                }
+            } catch (e) {
+                alert('保存失败: ' + e.message);
+            }
+        }
+
+        async function doCreateBlankScheme() {
+            if (!blankSchemeName.value.trim()) return;
+            if (!confirm('创建空白方案将清空当前所有规则组，确定？')) return;
+            try {
+                const res = await fetch('/api/schemes/blank', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: blankSchemeName.value.trim() }),
+                });
+                if (res.ok) {
+                    alert('空白方案已创建');
+                    showNewScheme.value = false;
+                    blankSchemeName.value = '';
+                    // 清空本地规则组显示
+                    ruleGroups.value = [];
+                    loadSchemes();
+                } else {
+                    const err = await res.json();
+                    alert('创建失败: ' + (err.detail || '未知错误'));
+                }
+            } catch (e) {
+                alert('创建失败: ' + e.message);
+            }
+        }
+
+        async function loadScheme(schemeId) {
+            try {
+                const res = await fetch(`/api/schemes/${schemeId}/load`, { method: 'POST' });
+                if (res.ok) {
+                    await loadConfig();
+                    selectedSchemeId.value = schemeId;
+                } else {
+                    alert('加载失败');
+                }
+            } catch (e) {
+                alert('加载失败: ' + e.message);
+            }
+        }
+
+        async function onSchemeSelect() {
+            const newId = selectedSchemeId.value;
+            if (newId) {
+                if (!confirm('切换方案将替换当前所有配置，确定？')) {
+                    selectedSchemeId.value = prevSchemeId.value;
+                    return;
+                }
+                await loadScheme(newId);
+            }
+            prevSchemeId.value = selectedSchemeId.value;
+        }
+
+        async function updateScheme() {
+            if (!selectedSchemeId.value) return;
+            const schemeName = schemes.value.find(s => s.id === selectedSchemeId.value)?.name;
+            if (!confirm(`确定将当前配置更新到方案「${schemeName}」？`)) return;
+            try {
+                const res = await fetch(`/api/schemes/${selectedSchemeId.value}`, { method: 'PUT' });
+                if (res.ok) {
+                    alert('方案已更新');
+                } else {
+                    alert('更新失败');
+                }
+            } catch (e) {
+                alert('更新失败: ' + e.message);
+            }
+        }
+
+        async function deleteSchemeItem(schemeId) {
+            if (!confirm('确定删除此方案？')) return;
+            try {
+                await fetch(`/api/schemes/${schemeId}`, { method: 'DELETE' });
+                schemes.value = schemes.value.filter(s => s.id !== schemeId);
+                if (selectedSchemeId.value === schemeId) selectedSchemeId.value = null;
+            } catch (e) {
+                console.error('删除方案失败:', e);
+            }
+        }
+
+        // === 加载配置 ===
+        async function loadConfig() {
+            try {
+                const [defsRes, traitsDefRes, groupsRes, filesRes] = await Promise.all([
+                    fetch('/api/attributes/definitions'),
+                    fetch('/api/traits/definitions'),
+                    fetch('/api/rules/groups'),
+                    fetch('/api/files'),
+                ]);
+
+                const defs = await defsRes.json();
+                attributeNames.value = Object.keys(defs);
+                attributeConfigs.value = defs;
+
+                traitDefs.value = await traitsDefRes.json();
+
+                const groupsData = await groupsRes.json();
+                ruleGroups.value = groupsData.groups || [];
+
+                const filesData = await filesRes.json();
+                imageFiles.value = filesData.files || [];
+            } catch (e) {
+                console.error('加载配置失败:', e);
+            }
+        }
+
+        async function loadFiles() {
+            try {
+                const res = await fetch('/api/files');
+                const data = await res.json();
+                imageFiles.value = data.files || [];
+            } catch (e) {
+                console.error('加载文件列表失败:', e);
+            }
+        }
+
+        // === 规则组操作 ===
+        async function createGroup() {
+            try {
+                const res = await fetch('/api/rules/groups', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: `规则组 ${ruleGroups.value.length + 1}` }),
+                });
+                const data = await res.json();
+                ruleGroups.value.push(data.group);
+            } catch (e) {
+                console.error('创建规则组失败:', e);
+            }
+        }
+
+        async function renameGroup(groupId, name) {
+            if (!name.trim()) return;
+            try {
+                await fetch(`/api/rules/groups/${groupId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: name.trim() }),
+                });
+                const group = ruleGroups.value.find(g => g.id === groupId);
+                if (group) group.name = name.trim();
+            } catch (e) {
+                console.error('重命名失败:', e);
+            }
+        }
+
+        async function deleteGroup(groupId) {
+            if (!confirm('确定删除此规则组？')) return;
+            try {
+                await fetch(`/api/rules/groups/${groupId}`, { method: 'DELETE' });
+                ruleGroups.value = ruleGroups.value.filter(g => g.id !== groupId);
+            } catch (e) {
+                console.error('删除规则组失败:', e);
+            }
+        }
+
+        // === 组特性操作 ===
+        async function onGroupTraitChange(groupId, traitName) {
+            const group = ruleGroups.value.find(g => g.id === groupId);
+            if (!group) return;
+            try {
+                const res = await fetch(`/api/rules/groups/${groupId}/trait`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ trait_name: traitName || null, trait_level: 4 }),
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    const idx = ruleGroups.value.findIndex(g => g.id === groupId);
+                    if (idx >= 0) ruleGroups.value[idx] = data.group;
+                }
+            } catch (e) {
+                console.error('更新组合特性失败:', e);
+            }
+        }
+
+        async function onGroupTraitLevelChange(groupId, traitName, level) {
+            try {
+                const res = await fetch(`/api/rules/groups/${groupId}/trait`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ trait_name: traitName, trait_level: level }),
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    const idx = ruleGroups.value.findIndex(g => g.id === groupId);
+                    if (idx >= 0) ruleGroups.value[idx] = data.group;
+                }
+            } catch (e) {
+                console.error('更新特性等级失败:', e);
+            }
+        }
+
+        // === 添加规则 ===
+        function startAddRule(groupId) {
+            addingToGroup.value = groupId;
+            addForm.selectedAttr = attributeNames.value[0] || '';
+            onAddFormAttrChange();
+        }
+
+        function onAddFormAttrChange() {
+            const c = addFormConfig.value;
+            if (c) {
+                addForm.threshold = Math.round((c.min + c.max) / 2 * 10) / 10;
+            }
+        }
+
+        async function confirmAddRule(groupId) {
+            if (!addForm.selectedAttr) return;
+            try {
+                const res = await fetch(`/api/rules/groups/${groupId}/rules`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        attribute_name: addForm.selectedAttr,
+                        threshold: addForm.threshold,
+                    }),
+                });
+                const data = await res.json();
+                const group = ruleGroups.value.find(g => g.id === groupId);
+                if (group) {
+                    group.rules.push(data.rule);
+                }
+                addingToGroup.value = null;
+            } catch (e) {
+                console.error('添加规则失败:', e);
+            }
+        }
+
+        async function deleteRule(groupId, ruleId) {
+            try {
+                await fetch(`/api/rules/groups/${groupId}/rules/${ruleId}`, { method: 'DELETE' });
+                const group = ruleGroups.value.find(g => g.id === groupId);
+                if (group) {
+                    group.rules = group.rules.filter(r => r.id !== ruleId);
+                }
+            } catch (e) {
+                console.error('删除规则失败:', e);
+            }
+        }
+
+        // === 分析 ===
+        async function analyzeImage() {
+            if (!analyzeFilename.value || analyzing.value) return;
+            analyzing.value = true;
+            analyzeResult.value = null;
+            try {
+                const schemeName = selectedSchemeId.value
+                    ? schemes.value.find(s => s.id === selectedSchemeId.value)?.name || null
+                    : null;
+                const res = await fetch('/api/enchantment/analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filename: analyzeFilename.value, scheme_name: schemeName }),
+                });
+                analyzeResult.value = await res.json();
+            } catch (e) {
+                console.error('分析失败:', e);
+                alert('分析失败: ' + e.message);
+            } finally {
+                analyzing.value = false;
+            }
+        }
+
+        // === 历史 ===
+        async function loadHistory() {
+            try {
+                const params = new URLSearchParams({
+                    limit: historyPageSize.toString(),
+                    offset: ((historyPage.value - 1) * historyPageSize).toString(),
+                });
+                if (historyFilter.value !== null) params.set('status', historyFilter.value);
+                if (historyTraitFilter.value) params.set('trait_filter', historyTraitFilter.value);
+                if (historyAttributeFilter.value) {
+                    params.set('attr_filters', JSON.stringify([historyAttributeFilter.value]));
+                }
+                if (historySchemeFilter.value) params.set('scheme_filter', historySchemeFilter.value);
+                const res = await fetch(`/api/history?${params}`);
+                const data = await res.json();
+                historyRecords.value = data.records || [];
+                historyTotal.value = data.total || 0;
+                // 更新方案名称列表（用于筛选下拉）
+                const names = new Set();
+                historyRecords.value.forEach(r => { if (r.scheme_name) names.add(r.scheme_name); });
+                if (data.scheme_names) data.scheme_names.forEach(n => names.add(n));
+                historySchemeNames.value = [...names].sort();
+            } catch (e) {
+                console.error('加载历史失败:', e);
+            }
+        }
+
+        async function deleteHistory(id) {
+            try {
+                await fetch(`/api/history/${id}`, { method: 'DELETE' });
+                historyRecords.value = historyRecords.value.filter(r => r.id !== id);
+                historyTotal.value--;
+            } catch (e) {
+                console.error('删除历史失败:', e);
+            }
+        }
+
+        async function confirmClearHistory() {
+            if (!confirm('确定要清空所有历史记录吗？此操作不可撤销。')) return;
+            try {
+                const res = await fetch('/api/history', { method: 'DELETE' });
+                const data = await res.json();
+                historyRecords.value = [];
+                historyTotal.value = 0;
+            } catch (e) {
+                console.error('清空历史失败:', e);
+            }
+        }
+
+        // 切换到历史tab时加载
+        watch(currentTab, (tab) => {
+            if (tab === 'history') loadHistory();
+            if (tab === 'analyze') loadFiles();
+        });
+
+        onMounted(async () => {
+            await loadConfig();
+            await loadSchemes();
+            // 恢复上次选中的方案
+            const saved = localStorage.getItem('selectedSchemeId');
+            if (saved) {
+                const id = parseInt(saved);
+                if (schemes.value.some(s => s.id === id)) {
+                    selectedSchemeId.value = id;
+                }
+            }
+            prevSchemeId.value = selectedSchemeId.value;
+        });
+
+        // 保存选中状态
+        watch(selectedSchemeId, (val) => {
+            if (val) localStorage.setItem('selectedSchemeId', val);
+            else localStorage.removeItem('selectedSchemeId');
+        });
+
+        // === 设置 ===
+        const settingsImageDir = ref('');
+        const settingsDefaultDir = ref('');
+        const settingsSaved = ref(false);
+        const settingsError = ref('');
+
+        async function loadSettings() {
+            try {
+                const res = await fetch('/api/settings');
+                const data = await res.json();
+                settingsImageDir.value = data.image_dir || '';
+                settingsDefaultDir.value = data.default_image_dir || '';
+            } catch (e) {}
+        }
+
+        async function saveSettings() {
+            settingsSaved.value = false;
+            settingsError.value = '';
+            try {
+                const res = await fetch('/api/settings', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image_dir: settingsImageDir.value }),
+                });
+                if (!res.ok) {
+                    const data = await res.json();
+                    settingsError.value = data.detail || '保存失败';
+                    return;
+                }
+                settingsSaved.value = true;
+                loadFiles();
+            } catch (e) {
+                settingsError.value = '网络错误';
+            }
+        }
+
+        watch(currentTab, (tab) => { if (tab === 'settings') loadSettings(); });
+
+        return {
+            currentTab, tabs,
+            attributeNames, attributeConfigs,
+            ruleGroups, traitDefs,
+            addingToGroup, addForm, addFormConfig, addFormPresetLabels, addFormPresetValues,
+            createGroup, renameGroup, deleteGroup,
+            startAddRule, onAddFormAttrChange, confirmAddRule, deleteRule,
+            getTraitDef, traitEffectDescFor,
+            onGroupTraitChange, onGroupTraitLevelChange,
+            loadConfig,
+            analyzeFilename, analyzing, analyzeResult, imageFiles, loadFiles,
+            analyzeImage,
+            historyRecords, historyTotal, historyFilter, historyTraitFilter, historyAttributeFilter, showAttributeFilter, historyPage, historyPageSize, historySchemeFilter, historySchemeNames,
+            loadHistory, deleteHistory, confirmClearHistory,
+            schemes, selectedSchemeId, showSaveScheme, showNewScheme, showSchemeMgr, newSchemeName, blankSchemeName,
+            loadSchemes, doSaveScheme, doCreateBlankScheme, loadScheme, deleteSchemeItem, onSchemeSelect, updateScheme,
+            settingsImageDir, settingsDefaultDir, settingsSaved, settingsError, saveSettings,
+        };
+    }
+}).mount('#app');
+</script>
+</body>
+</html>
