@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lcprojit projname="梦回初心附魔" lcprojversion="150" is_acc_mode="0" appname="梦回初心附魔" pkgname="com.laoshan.fumo">
+    <lua entry="梦回初心附魔.lua"/>
+    <ui entry="梦回初心附魔.ui"/>
+    <rc entry="梦回初心附魔.rc"/>
+    <luaej/>
+</lcprojit>
